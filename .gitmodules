@@ -1,0 +1,9 @@
+[submodule "external/xz"]
+	path = external/xz
+	url = https://git.tukaani.org/xz.git
+[submodule "external/fmt"]
+	path = external/fmt
+	url = git@github.com:fmtlib/fmt.git
+[submodule "external/mio"]
+	path = external/mio
+	url = https://github.com/mandreyel/mio.git
