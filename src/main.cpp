@@ -1,15 +1,19 @@
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <fmt/core.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <mio/mmap.hpp>
 
 inline static void blank_file(const std::string & file_path, size_t size)
@@ -19,45 +23,130 @@ inline static void blank_file(const std::string & file_path, size_t size)
 	file.write("", 1);
 }
 
-inline static int compress_hxv(char sep, const char * begin, const char * end, char * output, uint64_t & line_count)
+template<typename T>
+inline static T from_hex_chars(const char * input)
 {
+	T re = 0;
+	for (auto ptr = input; ptr < input + 2 * sizeof(T); ++ptr)
+	{
+		char c = *ptr;
+		re = (re << 4) + (c >= 'A' ? c - 'A' + 10 : c - '0');
+	}
+	return re;
+}
+
+inline static const char * hxv_read_line(uint8_t & ss, uint8_t & nn, uint16_t * output, const char * pos, char sep)
+{
+	ss = from_hex_chars<uint8_t>(pos);
+	pos += 2;
+	nn = from_hex_chars<uint8_t>(pos);
+	pos += 3;
+
+	for (size_t i = 0; i < 4; ++i)
+	{
+		uint16_t cell = 0;
+		output[i] = from_hex_chars<uint16_t>(pos);
+		pos += 4;
+
+		if (char c = *pos; c == sep || c == '\n')
+			++pos;
+		else
+		{
+			fmt::print(stderr, "Unexpected character (ASCII {}).\n", size_t(c));
+			return nullptr;
+		}
+	}
+	return pos;
+}
+
+template<typename T, typename DT, typename CT>
+class entropy_counter final
+{
+	T value;
+	DT diff;
+	CT count;
+	std::vector<std::pair<DT, CT>> counter;
+public:
+	entropy_counter() : value(0), diff(0), count(0), counter() {}
+
+	void add(T new_value)
+	{
+		DT current_diff = DT(new_value) - DT(value);
+		if (current_diff == diff)
+			++count;
+		else
+		{
+			if (count)
+				counter.emplace_back(diff, count);
+			diff = current_diff;
+			count = 1;
+		}
+		value = new_value;
+	}
+
+	auto & commit()
+	{
+		if (count)
+			counter.emplace_back(diff, count);
+		return *this;
+	}
+
+	auto size() const
+	{
+		return counter.size();
+	}
+
+	char * write_to(char * pos) const
+	{
+		*reinterpret_cast<uint64_t *>(pos) = uint64_t(counter.size());
+		pos += 8;
+		for (const auto & [diff, count] : counter)
+		{
+			*reinterpret_cast<DT *>(pos) = diff;
+			pos += sizeof(DT);
+			*reinterpret_cast<CT *>(pos) = count;
+			pos += sizeof(CT);
+		}
+		return pos;
+	}
+};
+
+inline static int compress_hxv(char sep, const char * begin, const char * end, char * output, uint64_t & line_count, uint64_t & ss_size, uint64_t & nn_size)
+{
+	entropy_counter<uint8_t, int16_t, uint64_t> ss_counter, nn_counter;
+
+	line_count = 0;
 	auto write_pos = output;
 	for (auto pos = begin; pos < end;)
 	{
-		auto cells = reinterpret_cast<uint16_t *>(write_pos);
-		write_pos += 10;
-
-		for (size_t i = 0; i < 5; ++i)
+		uint8_t ss, nn;
+		uint16_t buffer[4];
+		if (auto ptr = hxv_read_line(ss, nn, buffer, pos, sep); ptr)
 		{
-			uint16_t cell = 0;
-			auto ptr = pos;
-			for(; ptr < pos + 4; ++ptr)
-			{
-				char c = *ptr;
-				uint16_t digit = c >= 'A' ? c - 'A' + 10 : c - '0';
-				cell = (cell << 4) + digit;
-			}
-
-			if (char c = *ptr; c == sep || c == '\n')
-				pos = ptr + 1;
-			else if (c == '\r')
-				pos = ptr + 2;
-			else
-			{
-				fmt::print(stderr, "Unexpected character (ASCII {}).\n", size_t(c));
-				return 2;
-			}
-
-			cells[i] = cell;
+			pos = ptr;
+			++line_count;
 		}
+		else
+			return 1;
 
-		++line_count;
+		ss_counter.add(ss);
+		nn_counter.add(nn);
+		std::copy(buffer, buffer + 4, reinterpret_cast<uint16_t *>(write_pos));
+		write_pos += 8;
 	}
+
+	write_pos = ss_counter.commit().write_to(write_pos);
+	ss_size = ss_counter.size();
+
+	nn_counter.commit().write_to(write_pos);
+	nn_size = nn_counter.size();
+
 	return 0;
 }
 
 inline static int compress_dat(char sep, const char * begin, const char * end, char * output, uint64_t & line_count)
 {
+	line_count = 0;
 	auto write_pos = output;
 	for (auto pos = begin; pos < end;)
 	{
@@ -130,19 +219,22 @@ inline static int compress(std::string source_path, std::string dest_path)
 	auto write_pos = dest.begin();
 	*write_pos++ = sep;
 
-	uint64_t line_count = 0;
-
+	uint64_t line_count;
+	size_t line_width, extra_size;
 	if (is_hxv)
 	{
 		*write_pos++ = 'h';
-		if (auto ret = compress_hxv(sep, source.begin(), source.end(), write_pos + 8, line_count); ret)
+		uint64_t ss_size, nn_size;
+		if (auto ret = compress_hxv(sep, source.begin(), source.end(), write_pos + 8, line_count, ss_size, nn_size); ret)
 		{
 			fmt::print(stderr, "Error while compressing HXV ({}).\n", ret);
 			return ret;
 		}
 
 		*reinterpret_cast<uint64_t *>(write_pos) = line_count;
-		std::filesystem::resize_file(dest_path, line_count * 10 + 10);
+
+		line_width = 8;
+		extra_size = 10 + 16 + (ss_size + nn_size) * 10;
 	}
 	else
 	{
@@ -156,40 +248,76 @@ inline static int compress(std::string source_path, std::string dest_path)
 		auto numbers = reinterpret_cast<uint64_t *>(write_pos);
 		numbers[0] = line_count;
 		numbers[1] = source.size();
-		std::filesystem::resize_file(dest_path, line_count * 568 + 18);
+
+		line_width = 568;
+		extra_size = 18;
 	}
+
+	std::filesystem::resize_file(dest_path, line_count * line_width + extra_size);
 
 	return 0;
 }
 
-int decompress_hxv(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
+template<typename T>
+void to_hex_chars(T value, char * output)
+{
+	for (auto reverse = output + 2 * sizeof(T) - 1; reverse >= output; --reverse)
+	{
+		uint8_t digit = value & 0xF;
+		*reverse = digit < 10 ? '0' + digit : 'A' + digit - 10;
+		value >>= 4;
+	}
+}
+
+const char * reconstruct_hxv_value_from_entropy(const char * read_pos, char * write_pos)
+{
+	uint64_t size = *reinterpret_cast<const uint64_t *>(read_pos);
+	read_pos += 8;
+
+	uint8_t value = 0;
+	for (uint64_t i = 0; i < size; ++i)
+	{
+		int16_t diff = *reinterpret_cast<const int16_t *>(read_pos);
+		read_pos += 2;
+		uint64_t count = *reinterpret_cast<const uint64_t *>(read_pos);
+		read_pos += 8;
+
+		for (size_t j = 0; j < count; ++j)
+		{
+			value += diff;
+			to_hex_chars(value, write_pos);
+			write_pos += 25;
+		}
+	}
+
+	return read_pos;
+}
+
+inline static int decompress_hxv(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
 {
 	auto read_pos = begin;
 	auto write_pos = output;
 	for (uint64_t line = 0; line < line_count; ++line)
 	{
+		write_pos += 4;
+		*write_pos++ = sep;
+
 		auto cells = reinterpret_cast<uint16_t const *>(read_pos);
-		read_pos += 10;
+		read_pos += 8;
 
-		for(size_t i = 0; i < 5; ++i)
+		for(size_t i = 0; i < 4; ++i)
 		{
-			auto cell = cells[i];
-			for (auto reverse = write_pos + 3; reverse >= write_pos; --reverse)
-			{
-				auto digit = cell & 0b1111;
-				char c = digit < 10 ? '0' + digit : 'A' + digit - 10;
-				*reverse = c;
-				cell >>= 4;
-			}
-
+			to_hex_chars(cells[i], write_pos);
 			write_pos += 4;
-			*write_pos++ = i == 4 ? '\n' : sep;
+			*write_pos++ = i == 3 ? '\n' : sep;
 		}
 	}
+	read_pos = reconstruct_hxv_value_from_entropy(read_pos, output);
+	reconstruct_hxv_value_from_entropy(read_pos, output + 2);
 	return 0;
 }
 
-int decompress_dat(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
+inline static int decompress_dat(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
 {
 	auto read_pos = begin;
 	auto write_pos = output;
