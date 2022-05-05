@@ -61,6 +61,54 @@ inline static const char * hxv_read_line(uint8_t & ss, uint8_t & nn, uint16_t * 
 	return pos;
 }
 
+template<typename T, typename CT>
+class simple_counter final
+{
+	T value;
+	CT count;
+	std::vector<std::pair<T, CT>> counter;
+public:
+	simple_counter() : value(0), count(0), counter() {}
+
+	void add(T new_value)
+	{
+		if (value == new_value)
+			++count;
+		else
+		{
+			counter.emplace_back(value, count);
+			value = new_value;
+			count = 1;
+		}
+	}
+
+	auto & commit()
+	{
+		if (count)
+			counter.emplace_back(value, count);
+		return *this;
+	}
+
+	auto size() const
+	{
+		return counter.size();
+	}
+
+	char * write_to(char * pos) const
+	{
+		*reinterpret_cast<uint64_t *>(pos) = uint64_t(counter.size());
+		pos += 8;
+		for (const auto & [value, count] : counter)
+		{
+			*reinterpret_cast<T *>(pos) = value;
+			pos += sizeof(T);
+			*reinterpret_cast<CT *>(pos) = count;
+			pos += sizeof(CT);
+		}
+		return pos;
+	}
+};
+
 template<typename T, typename DT, typename CT>
 class entropy_counter final
 {
@@ -107,8 +155,8 @@ public:
 		pos += 8;
 		for (const auto & [diff, count] : counter)
 		{
-			*reinterpret_cast<DT *>(pos) = diff;
-			pos += sizeof(DT);
+			*reinterpret_cast<T *>(pos) = T(diff);
+			pos += sizeof(T);
 			*reinterpret_cast<CT *>(pos) = count;
 			pos += sizeof(CT);
 		}
@@ -118,7 +166,8 @@ public:
 
 inline static int compress_hxv(char sep, const char * begin, const char * end, char * output, uint64_t & line_count, uint64_t & ss_size, uint64_t & nn_size)
 {
-	entropy_counter<uint8_t, int16_t, uint64_t> ss_counter, nn_counter;
+	simple_counter<uint8_t, uint64_t> ss_counter;
+	entropy_counter<uint8_t, int16_t, uint64_t> nn_counter;
 
 	line_count = 0;
 	auto write_pos = output;
@@ -274,7 +323,29 @@ void to_hex_chars(T value, char * output)
 	}
 }
 
-const char * reconstruct_hxv_value_from_entropy(const char * read_pos, char * write_pos)
+const char * reconstruct_hxv_value_from_simple_counter(const char * read_pos, char * write_pos)
+{
+	uint64_t size = *reinterpret_cast<const uint64_t *>(read_pos);
+	read_pos += 8;
+
+	for (uint64_t i = 0; i < size; ++i)
+	{
+		uint8_t value = *reinterpret_cast<const uint8_t *>(read_pos);
+		read_pos += 1;
+		uint64_t count = *reinterpret_cast<const uint64_t *>(read_pos);
+		read_pos += 8;
+
+		for (size_t j = 0; j < count; ++j)
+		{
+			to_hex_chars(value, write_pos);
+			write_pos += 25;
+		}
+	}
+
+	return read_pos;
+}
+
+const char * reconstruct_hxv_value_from_entropy_counter(const char * read_pos, char * write_pos)
 {
 	uint64_t size = *reinterpret_cast<const uint64_t *>(read_pos);
 	read_pos += 8;
@@ -282,8 +353,8 @@ const char * reconstruct_hxv_value_from_entropy(const char * read_pos, char * wr
 	uint8_t value = 0;
 	for (uint64_t i = 0; i < size; ++i)
 	{
-		int16_t diff = *reinterpret_cast<const int16_t *>(read_pos);
-		read_pos += 2;
+		uint8_t diff = *reinterpret_cast<const uint8_t *>(read_pos);
+		read_pos += 1;
 		uint64_t count = *reinterpret_cast<const uint64_t *>(read_pos);
 		read_pos += 8;
 
@@ -317,8 +388,8 @@ inline static int decompress_hxv(char sep, uint64_t line_count, const char * beg
 			*write_pos++ = i == 3 ? '\n' : sep;
 		}
 	}
-	read_pos = reconstruct_hxv_value_from_entropy(read_pos, output);
-	reconstruct_hxv_value_from_entropy(read_pos, output + 2);
+	read_pos = reconstruct_hxv_value_from_simple_counter(read_pos, output);
+	reconstruct_hxv_value_from_entropy_counter(read_pos, output + 2);
 	return 0;
 }
 
