@@ -9,11 +9,11 @@ include(mio)
 include(common)
 set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ -static")
 
-add_executable(main src/main.cpp)
-target_include_directories(main PRIVATE
+add_executable(task src/task.cpp)
+target_include_directories(task PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-target_link_libraries(main PRIVATE
+target_link_libraries(task PRIVATE
 	fmt::fmt
 	mio::mio
 )

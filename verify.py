@@ -42,7 +42,7 @@ def _main() -> int:
             return r
 
     if args.build:
-        if r := _execute("cmake", "--build", "build", "--target", "main"):
+        if r := _execute("cmake", "--build", "build", "--target", "task"):
             print("Failed to build the executable.", file=sys.stderr)
             return r
 
@@ -51,7 +51,7 @@ def _main() -> int:
         decompressed_file = file.with_suffix(".decompressed")
 
         now = time.monotonic()
-        if r := _execute("build/main", "c", file, compressed_file):
+        if r := _execute("build/task", "c", file, compressed_file):
             print("Failed to compress the file.", file=sys.stderr)
             return r
         compress_time = time.monotonic() - now
@@ -60,7 +60,7 @@ def _main() -> int:
         print(f"Ratio: {file.stat().st_size / compressed_file.stat().st_size: .3f}")
 
         now = time.monotonic()
-        if r := _execute("build/main", "d", compressed_file, decompressed_file):
+        if r := _execute("build/task", "d", compressed_file, decompressed_file):
             print("Failed to decompress the compressed file.", file=sys.stderr)
             return r
         decompress_time = time.monotonic() - now
