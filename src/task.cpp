@@ -5,9 +5,11 @@
 #include <charconv>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -71,7 +73,10 @@ public:
 
 	void add(T new_value)
 	{
-		DT current_diff = DT(new_value) - DT(value);
+		DT current_diff = (DT(new_value) - DT(value));
+		if constexpr (std::is_integral_v<T>)
+			current_diff &= std::numeric_limits<T>::max();
+
 		if (current_diff == diff)
 			++count;
 		else
