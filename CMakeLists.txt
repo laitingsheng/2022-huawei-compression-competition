@@ -9,7 +9,7 @@ include(mio)
 include(common)
 set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ -static")
 
-add_executable(task src/task.cpp)
+add_executable(task src/task.cpp src/lz4.c src/lz4hc.c)
 target_include_directories(task PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )

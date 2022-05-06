@@ -4,3 +4,6 @@
 [submodule "external/mio"]
 	path = external/mio
 	url = https://github.com/mandreyel/mio.git
+[submodule "external/lz4"]
+	path = external/lz4
+	url = git@github.com:lz4/lz4.git
