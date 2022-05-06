@@ -18,223 +18,12 @@
 #include <fmt/ranges.h>
 #include <mio/mmap.hpp>
 
-inline static void blank_file(const std::string & file_path, size_t size)
-{
-	std::ofstream file(file_path, std::ios::binary);
-	file.seekp(size - 1);
-	file.write("", 1);
-}
+#include "dat.hpp"
+#include "hxv.hpp"
+#include "utils.hpp"
 
-template<typename T>
-inline static T from_hex_chars(const char * input)
-{
-	T re = 0;
-	for (auto ptr = input; ptr < input + 2 * sizeof(T); ++ptr)
-	{
-		char c = *ptr;
-		re = (re << 4) + (c >= 'A' ? c - 'A' + 10 : c - '0');
-	}
-	return re;
-}
-
-inline static const char * hxv_read_line(uint8_t & ss, uint8_t & nn, uint16_t * output, const char * pos, char sep)
-{
-	ss = from_hex_chars<uint8_t>(pos);
-	pos += 2;
-	nn = from_hex_chars<uint8_t>(pos);
-	pos += 3;
-
-	for (size_t i = 0; i < 4; ++i)
-	{
-		uint16_t cell = 0;
-		output[i] = from_hex_chars<uint16_t>(pos);
-		pos += 4;
-
-		if (char c = *pos; c == sep || c == '\n')
-			++pos;
-		else
-		{
-			fmt::print(stderr, "Unexpected character (ASCII {}).\n", size_t(c));
-			return nullptr;
-		}
-	}
-	return pos;
-}
-
-template<typename T, typename CT>
-class simple_counter final
-{
-	T value;
-	CT count;
-	std::vector<std::pair<T, CT>> counter;
-public:
-	simple_counter() : value(0), count(0), counter() {}
-
-	void add(T new_value)
-	{
-		if (value == new_value)
-			++count;
-		else
-		{
-			counter.emplace_back(value, count);
-			value = new_value;
-			count = 1;
-		}
-	}
-
-	auto & commit()
-	{
-		if (count)
-			counter.emplace_back(value, count);
-		return *this;
-	}
-
-	auto size() const
-	{
-		return counter.size();
-	}
-
-	char * write_to(char * pos) const
-	{
-		*reinterpret_cast<uint64_t *>(pos) = uint64_t(counter.size());
-		pos += 8;
-		for (const auto & [value, count] : counter)
-		{
-			*reinterpret_cast<T *>(pos) = value;
-			pos += sizeof(T);
-			*reinterpret_cast<CT *>(pos) = count;
-			pos += sizeof(CT);
-		}
-		return pos;
-	}
-};
-
-template<typename T, typename DT, typename CT>
-class entropy_counter final
-{
-	T value;
-	DT diff;
-	CT count;
-	std::vector<std::pair<DT, CT>> counter;
-public:
-	entropy_counter() : value(0), diff(0), count(0), counter() {}
-
-	void add(T new_value)
-	{
-		DT current_diff = (DT(new_value) - DT(value));
-		if constexpr (std::is_integral_v<T>)
-			current_diff &= std::numeric_limits<T>::max();
-
-		if (current_diff == diff)
-			++count;
-		else
-		{
-			if (count)
-				counter.emplace_back(diff, count);
-			diff = current_diff;
-			count = 1;
-		}
-		value = new_value;
-	}
-
-	auto & commit()
-	{
-		if (count)
-			counter.emplace_back(diff, count);
-		return *this;
-	}
-
-	auto size() const
-	{
-		return counter.size();
-	}
-
-	char * write_to(char * pos) const
-	{
-		*reinterpret_cast<uint64_t *>(pos) = uint64_t(counter.size());
-		pos += 8;
-		for (const auto & [diff, count] : counter)
-		{
-			*reinterpret_cast<T *>(pos) = T(diff);
-			pos += sizeof(T);
-			*reinterpret_cast<CT *>(pos) = count;
-			pos += sizeof(CT);
-		}
-		return pos;
-	}
-};
-
-inline static int compress_hxv(char sep, const char * begin, const char * end, char * output, uint64_t & line_count, uint64_t & ss_size, uint64_t & nn_size)
-{
-	simple_counter<uint8_t, uint64_t> ss_counter;
-	entropy_counter<uint8_t, int16_t, uint64_t> nn_counter;
-
-	line_count = 0;
-	auto write_pos = output;
-	for (auto pos = begin; pos < end;)
-	{
-		uint8_t ss, nn;
-		uint16_t buffer[4];
-		if (auto ptr = hxv_read_line(ss, nn, buffer, pos, sep); ptr)
-		{
-			pos = ptr;
-			++line_count;
-		}
-		else
-			return 1;
-
-		ss_counter.add(ss);
-		nn_counter.add(nn);
-		std::copy(buffer, buffer + 4, reinterpret_cast<uint16_t *>(write_pos));
-		write_pos += 8;
-	}
-
-	write_pos = ss_counter.commit().write_to(write_pos);
-	ss_size = ss_counter.size();
-
-	nn_counter.commit().write_to(write_pos);
-	nn_size = nn_counter.size();
-
-	return 0;
-}
-
-inline static int compress_dat(char sep, const char * begin, const char * end, char * output, uint64_t & line_count)
-{
-	line_count = 0;
-	auto write_pos = output;
-	for (auto pos = begin; pos < end;)
-	{
-		auto cells = reinterpret_cast<double *>(write_pos);
-		write_pos += 568;
-
-		for (size_t i = 0; i < 71; ++i)
-		{
-			char * ptr;
-			double cell = strtod(pos, &ptr);
-			if (ptr == pos)
-			{
-				fmt::print(stderr, "Unexpected character (ASCII {}).\n", size_t(*ptr));
-				return 2;
-			}
-
-			if (char c = *ptr; c == sep || c == '\n')
-				pos = ptr + 1;
-			else if (c == '\r')
-				pos = ptr + 2;
-			else
-			{
-				fmt::print(stderr, "Unexpected character (ASCII {}).\n", size_t(c));
-				return 2;
-			}
-
-			cells[i] = cell;
-		}
-
-		++line_count;
-	}
-	return 0;
-}
-
+[[nodiscard]]
+[[using gnu : always_inline]]
 inline static int compress(std::string source_path, std::string dest_path)
 {
 	auto source = mio::mmap_source(source_path);
@@ -242,6 +31,7 @@ inline static int compress(std::string source_path, std::string dest_path)
 	std::string buffer;
 	buffer.reserve(100);
 	char sep = 0;
+	bool is_hxv = true;
 	for (char c : source)
 	{
 		if (c == ',' || c == ' ')
@@ -249,6 +39,8 @@ inline static int compress(std::string source_path, std::string dest_path)
 			sep = c;
 			break;
 		}
+		else if (!isdigit(c))
+			is_hxv = false;
 		buffer.push_back(c);
 	}
 
@@ -258,179 +50,51 @@ inline static int compress(std::string source_path, std::string dest_path)
 		return 1;
 	}
 
-	bool is_hxv = true;
-	for (char c : buffer)
-		if (!isdigit(c))
-		{
-			is_hxv = false;
-			break;
-		}
-
-	blank_file(dest_path, source.size());
+	utils::blank_file(dest_path, source.size());
 	auto dest = mio::mmap_sink(dest_path);
-
 
 	auto write_pos = dest.begin();
 	*write_pos++ = sep;
 
-	uint64_t line_count;
-	size_t line_width, extra_size;
 	if (is_hxv)
 	{
 		*write_pos++ = 'h';
-		uint64_t ss_size, nn_size;
-		if (auto ret = compress_hxv(sep, source.begin(), source.end(), write_pos + 8, line_count, ss_size, nn_size); ret)
+
+		uint32_t line_count, size;
+		if (auto ret = hxv::compress(
+			source.begin(),
+			source.end(),
+			sep,
+			line_count,
+			write_pos + 4,
+			source.size() - 6,
+			size
+		); ret)
 		{
 			fmt::print(stderr, "Error while compressing HXV ({}).\n", ret);
 			return ret;
 		}
 
-		*reinterpret_cast<uint64_t *>(write_pos) = line_count;
-
-		line_width = 8;
-		extra_size = 10 + 16 + (ss_size + nn_size) * 10;
+		*reinterpret_cast<uint32_t *>(write_pos) = line_count;
+		std::filesystem::resize_file(dest_path, size + 6);
 	}
 	else
 	{
+		uint32_t written;
 		*write_pos++ = 'd';
-		if (auto ret = compress_dat(sep, source.begin(), source.end(), write_pos + 16, line_count); ret)
+		if (auto ret = dat::compress(source.begin(), source.size(), source.size() - 10, write_pos + 8, written); ret)
 		{
 			fmt::print(stderr, "Error while compressing DAT ({}).\n", ret);
 			return ret;
 		}
 
-		auto numbers = reinterpret_cast<uint64_t *>(write_pos);
-		numbers[0] = line_count;
-		numbers[1] = source.size();
+		auto numbers = reinterpret_cast<uint32_t *>(write_pos);
+		numbers[0] = source.size();
+		numbers[1] = written;
 
-		line_width = 568;
-		extra_size = 18;
+		std::filesystem::resize_file(dest_path, written + 10);
 	}
 
-	std::filesystem::resize_file(dest_path, line_count * line_width + extra_size);
-
-	return 0;
-}
-
-template<typename T>
-void to_hex_chars(T value, char * output)
-{
-	for (auto reverse = output + 2 * sizeof(T) - 1; reverse >= output; --reverse)
-	{
-		uint8_t digit = value & 0xF;
-		*reverse = digit < 10 ? '0' + digit : 'A' + digit - 10;
-		value >>= 4;
-	}
-}
-
-const char * reconstruct_hxv_value_from_simple_counter(const char * read_pos, char * write_pos)
-{
-	uint64_t size = *reinterpret_cast<const uint64_t *>(read_pos);
-	read_pos += 8;
-
-	for (uint64_t i = 0; i < size; ++i)
-	{
-		uint8_t value = *reinterpret_cast<const uint8_t *>(read_pos);
-		read_pos += 1;
-		uint64_t count = *reinterpret_cast<const uint64_t *>(read_pos);
-		read_pos += 8;
-
-		for (size_t j = 0; j < count; ++j)
-		{
-			to_hex_chars(value, write_pos);
-			write_pos += 25;
-		}
-	}
-
-	return read_pos;
-}
-
-const char * reconstruct_hxv_value_from_entropy_counter(const char * read_pos, char * write_pos)
-{
-	uint64_t size = *reinterpret_cast<const uint64_t *>(read_pos);
-	read_pos += 8;
-
-	uint8_t value = 0;
-	for (uint64_t i = 0; i < size; ++i)
-	{
-		uint8_t diff = *reinterpret_cast<const uint8_t *>(read_pos);
-		read_pos += 1;
-		uint64_t count = *reinterpret_cast<const uint64_t *>(read_pos);
-		read_pos += 8;
-
-		for (size_t j = 0; j < count; ++j)
-		{
-			value += diff;
-			to_hex_chars(value, write_pos);
-			write_pos += 25;
-		}
-	}
-
-	return read_pos;
-}
-
-inline static int decompress_hxv(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
-{
-	auto read_pos = begin;
-	auto write_pos = output;
-	for (uint64_t line = 0; line < line_count; ++line)
-	{
-		write_pos += 4;
-		*write_pos++ = sep;
-
-		auto cells = reinterpret_cast<uint16_t const *>(read_pos);
-		read_pos += 8;
-
-		for(size_t i = 0; i < 4; ++i)
-		{
-			to_hex_chars(cells[i], write_pos);
-			write_pos += 4;
-			*write_pos++ = i == 3 ? '\n' : sep;
-		}
-	}
-	read_pos = reconstruct_hxv_value_from_simple_counter(read_pos, output);
-	reconstruct_hxv_value_from_entropy_counter(read_pos, output + 2);
-	return 0;
-}
-
-inline static int decompress_dat(char sep, uint64_t line_count, const char * begin, const char * end, char * output)
-{
-	auto read_pos = begin;
-	auto write_pos = output;
-	for (uint64_t line = 0; line < line_count; ++line)
-	{
-		auto cells = reinterpret_cast<double const *>(read_pos);
-		read_pos += 568;
-
-		auto cell = cells[0];
-		if (auto ptr = fmt::format_to(write_pos, "{:.3f}", cell); ptr == write_pos)
-		{
-			fmt::print(stderr, "Error while extracting number.\n");
-			return 2;
-		}
-		else
-			write_pos = ptr;
-		*write_pos++ = sep;
-
-		for (size_t i = 1; i < 71; ++i)
-		{
-			cell = cells[i];
-			if (auto ptr = fmt::format_to(write_pos, "{:.5f}", cell); ptr == write_pos)
-			{
-				fmt::print(stderr, "Error while extracting number.\n");
-				return 2;
-			}
-			else
-				write_pos = ptr;
-			if (i == 70)
-			{
-				*write_pos++ = '\r';
-				*write_pos++ = '\n';
-			}
-			else
-				*write_pos++ = sep;
-		}
-	}
 	return 0;
 }
 
@@ -442,12 +106,12 @@ inline static int decompress(std::string source_path, std::string dest_path)
 	char sep = *read_pos++;
 	if (auto format = *read_pos++; format == 'h')
 	{
-		auto line_count = *reinterpret_cast<uint64_t const *>(read_pos);
+		auto line_count = *reinterpret_cast<uint32_t const *>(read_pos);
 
-		blank_file(dest_path, line_count * 25);
+		utils::blank_file(dest_path, line_count * 25);
 		auto dest = mio::mmap_sink(dest_path);
 
-		if (auto ret = decompress_hxv(sep, line_count, read_pos + 8, source.end(), dest.begin()); ret)
+		if (auto ret = hxv::decompress(read_pos + 4, sep, line_count, dest.data()); ret)
 		{
 			fmt::print(stderr, "Error while decompressing HXV ({}).\n", ret);
 			return ret;
@@ -455,13 +119,13 @@ inline static int decompress(std::string source_path, std::string dest_path)
 	}
 	else if (format == 'd')
 	{
-		auto numbers = reinterpret_cast<uint64_t const *>(read_pos);
-		auto line_count = numbers[0], decompressed_size = numbers[1];
+		auto numbers = reinterpret_cast<uint32_t const *>(read_pos);
+		auto decompressed = numbers[0], compressed = numbers[1];
 
-		blank_file(dest_path, decompressed_size);
+		utils::blank_file(dest_path, decompressed);
 		auto dest = mio::mmap_sink(dest_path);
 
-		if (auto ret = decompress_dat(sep, line_count, read_pos + 16, source.end(), dest.begin()); ret)
+		if (auto ret = dat::decompress(read_pos + 8, compressed, decompressed, dest.begin()); ret)
 		{
 			fmt::print(stderr, "Error while decompressing DAT ({}).\n", ret);
 			return ret;
