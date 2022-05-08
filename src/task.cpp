@@ -80,9 +80,18 @@ inline static int compress(std::string source_path, std::string dest_path)
 	}
 	else
 	{
-		uint32_t written;
 		*write_pos++ = 'd';
-		if (auto ret = dat::compress(source.begin(), source.size(), source.size() - 10, write_pos + 8, written); ret)
+
+		uint32_t line_count, size;
+		if (auto ret = dat::compress(
+			source.begin(),
+			source.end(),
+			sep,
+			line_count,
+			write_pos + 8,
+			source.size() - 10,
+			size
+		); ret)
 		{
 			fmt::print(stderr, "Error while compressing DAT ({}).\n", ret);
 			return ret;
@@ -90,14 +99,16 @@ inline static int compress(std::string source_path, std::string dest_path)
 
 		auto numbers = reinterpret_cast<uint32_t *>(write_pos);
 		numbers[0] = source.size();
-		numbers[1] = written;
+		numbers[1] = line_count;
 
-		std::filesystem::resize_file(dest_path, written + 10);
+		std::filesystem::resize_file(dest_path, size + 10);
 	}
 
 	return 0;
 }
 
+[[nodiscard]]
+[[using gnu : always_inline]]
 inline static int decompress(std::string source_path, std::string dest_path)
 {
 	auto source = mio::mmap_source(source_path);
@@ -120,12 +131,13 @@ inline static int decompress(std::string source_path, std::string dest_path)
 	else if (format == 'd')
 	{
 		auto numbers = reinterpret_cast<uint32_t const *>(read_pos);
-		auto decompressed = numbers[0], compressed = numbers[1];
+		auto original_size = numbers[0];
+		auto line_count = numbers[1];
 
-		utils::blank_file(dest_path, decompressed);
+		utils::blank_file(dest_path, original_size);
 		auto dest = mio::mmap_sink(dest_path);
 
-		if (auto ret = dat::decompress(read_pos + 8, compressed, decompressed, dest.begin()); ret)
+		if (auto ret = dat::decompress(read_pos + 8, sep, line_count, dest.data()); ret)
 		{
 			fmt::print(stderr, "Error while decompressing DAT ({}).\n", ret);
 			return ret;
