@@ -1,10 +1,12 @@
 #ifndef __HXV_HPP__
 #define __HXV_HPP__
 
-#include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
+
+#include <vector>
+
+#include <fmt/core.h>
 
 #include "utils.hpp"
 
@@ -29,6 +31,20 @@ inline static const char * from_hex_chars(const char * input, T & value)
 	return ptr;
 }
 
+template<typename T>
+[[nodiscard]]
+[[using gnu : always_inline, hot]]
+inline static const char * from_hex_chars(const char * input, char sep, T & value)
+{
+	auto ptr = from_hex_chars(input, value);
+	if (*ptr++ != sep)
+	{
+		fmt::print(stderr, "Separator mismatched\n");
+		return nullptr;
+	}
+	return ptr;
+}
+
 [[nodiscard]]
 [[using gnu : always_inline, hot]]
 inline static const char * readline(
@@ -43,13 +59,30 @@ inline static const char * readline(
 )
 {
 	pos = from_hex_chars(pos, ss);
-	pos = from_hex_chars(pos, nn) + 1;
-	pos = from_hex_chars(pos, yyyy) + 1;
-	pos = from_hex_chars(pos, hhhn) + 1;
-	pos = from_hex_chars(pos, nnww) + 1;
-	pos = from_hex_chars(pos, wppp);
+	if (!pos)
+		return nullptr;
 
-	return pos + 1;
+	pos = from_hex_chars(pos, sep, nn);
+	if (!pos)
+		return nullptr;
+
+	pos = from_hex_chars(pos, sep, yyyy);
+	if (!pos)
+		return nullptr;
+
+	pos = from_hex_chars(pos, sep, hhhn);
+	if (!pos)
+		return nullptr;
+
+	pos = from_hex_chars(pos, sep, nnww);
+	if (!pos)
+		return nullptr;
+
+	pos = from_hex_chars(pos, '\n', wppp);
+	if (!pos)
+		return nullptr;
+
+	return pos;
 }
 
 [[nodiscard]]
@@ -65,7 +98,7 @@ inline int compress(
 )
 {
 	utils::counter::simple<uint8_t, uint32_t> ss_counter;
-	utils::counter::entropy<uint8_t, int16_t, uint32_t> nn_counter;
+	utils::counter::differential<uint8_t, int16_t, uint32_t> nn_counter;
 	std::vector<uint16_t> all_yyyy, all_hhhn, all_nnww, all_wppp;
 
 	line_count = 0;
@@ -74,6 +107,9 @@ inline int compress(
 		uint8_t ss, nn;
 		uint16_t yyyy, hhhn, nnww, wppp;
 		pos = readline(pos, sep, ss, nn, yyyy, hhhn, nnww, wppp);
+		if (!pos)
+			return 1;
+
 
 		ss_counter.add(ss);
 		nn_counter.add(nn);
@@ -118,7 +154,8 @@ inline int compress(
 }
 
 template<typename T>
-void to_hex_chars(T value, char * output)
+[[using gnu : always_inline, hot]]
+inline static void to_hex_chars(T value, char * output)
 {
 	for (auto reverse = output + 2 * sizeof(T) - 1; reverse >= output; --reverse)
 	{
@@ -154,7 +191,7 @@ inline static const char * from_simple_counter(const char * read_pos, char * wri
 
 [[nodiscard]]
 [[using gnu : always_inline, hot]]
-inline static const char * from_entropy_counter(const char * read_pos, char * write_pos)
+inline static const char * from_differential_counter(const char * read_pos, char * write_pos)
 {
 	auto size = *reinterpret_cast<const uint32_t *>(read_pos);
 	read_pos += 4;
@@ -178,14 +215,13 @@ inline static const char * from_entropy_counter(const char * read_pos, char * wr
 	return read_pos;
 }
 
-template<typename T>
 [[using gnu : always_inline, hot]]
-inline static void from_vector(const T * data, uint32_t count, char sep, char * write_pos)
+inline static void from_vector(const std::vector<uint16_t> & data, char sep, char * write_pos)
 {
-	for (uint32_t i = 0; i < count; ++i)
+	for (uint32_t i = 0; i < data.size(); ++i)
 	{
 		to_hex_chars(data[i], write_pos);
-		*(write_pos + 2 * sizeof(T)) = sep;
+		*(write_pos + 4) = sep;
 		write_pos += 25;
 	}
 }
@@ -202,7 +238,7 @@ inline static void write_separator(char sep, uint32_t count, char * write_pos)
 
 [[nodiscard]]
 [[using gnu : always_inline]]
-inline int decompress(
+inline static int decompress(
 	const char * begin,
 	char sep,
 	uint32_t line_count,
@@ -210,33 +246,31 @@ inline int decompress(
 )
 {
 	auto read_pos = from_simple_counter(begin, output);
-	read_pos = from_entropy_counter(read_pos, output + 2);
+	read_pos = from_differential_counter(read_pos, output + 2);
 
 	write_separator(sep, line_count, output + 4);
 
-	uint16_t * buffer = reinterpret_cast<uint16_t *>(malloc(2 * line_count));
+	std::vector<uint16_t> buffer(line_count);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer, line_count);
+	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, line_count, sep, output + 5);
+	from_vector(buffer, sep, output + 5);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer, line_count);
+	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, line_count, sep, output + 10);
+	from_vector(buffer, sep, output + 10);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer, line_count);
+	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, line_count, sep, output + 15);
+	from_vector(buffer, sep, output + 15);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer, line_count);
+	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, line_count, '\n', output + 20);
-
-	free(buffer);
+	from_vector(buffer, '\n', output + 20);
 
 	return 0;
 }

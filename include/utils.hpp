@@ -72,18 +72,18 @@ public:
 };
 
 template<typename T, typename DT, typename CT>
-class entropy final
+class differential final
 {
 	T value, diff;
 	CT count;
 	std::vector<std::pair<T, CT>> counter;
 public:
-	entropy() : value(0), diff(0), count(0), counter() {}
+	differential() : value(0), diff(0), count(0), counter() {}
 
 	void add(T new_value)
 	{
 		DT current_diff = DT(new_value) - DT(value);
-		if constexpr (std::is_integral_v<T>)
+		if constexpr (std::is_integral_v<T> && !std::is_same_v<T, DT>)
 			current_diff &= std::numeric_limits<T>::max();
 
 		if (current_diff == diff)
@@ -175,7 +175,7 @@ inline char * compress_vector(char * pos, uint32_t & capacity, uint32_t & writte
 	);
 	if (lz4_written < 0)
 	{
-		fmt::print(stderr, "Failed to compress the vector.\n");
+		fmt::print(stderr, "Failed to compress the vector (LZ4HC).\n");
 		return nullptr;
 	}
 	*reinterpret_cast<uint32_t *>(pos) = lz4_written;
@@ -189,19 +189,19 @@ inline char * compress_vector(char * pos, uint32_t & capacity, uint32_t & writte
 template<typename T>
 [[nodiscard]]
 [[using gnu : always_inline, hot]]
-inline const char * decompress_vector(const char * pos, T * data, uint32_t count)
+inline const char * decompress_vector(const char * pos, std::vector<T> & data)
 {
-	uint32_t compressed = *reinterpret_cast<const uint32_t *>(pos), decompressed = count * sizeof(T);
+	uint32_t compressed = *reinterpret_cast<const uint32_t *>(pos), decompressed = data.size() * sizeof(T);
 	int lz4_extracted = LZ4_decompress_safe(
 		pos + 4,
-		reinterpret_cast<char *>(data),
+		reinterpret_cast<char *>(data.data()),
 		compressed,
 		decompressed
 	);
 
 	if (lz4_extracted != decompressed)
 	{
-		fmt::print(stderr, "Failed to decompress the vector.\n");
+		fmt::print(stderr, "Failed to decompress the vector (LZ4HC).\n");
 		return nullptr;
 	}
 	return pos + compressed + 4;
