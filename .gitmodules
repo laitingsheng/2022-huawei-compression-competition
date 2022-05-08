@@ -10,3 +10,6 @@
 [submodule "external/frozen"]
 	path = external/frozen
 	url = git@github.com:serge-sans-paille/frozen.git
+[submodule "external/brotli"]
+	path = external/brotli
+	url = git@github.com:google/brotli.git
