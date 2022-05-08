@@ -48,7 +48,10 @@ def _main() -> int:
 
     for file in (args.files or ()):
         compressed_file = file.with_suffix(".compressed")
+        compressed_file.unlink(True)
+
         decompressed_file = file.with_suffix(".decompressed")
+        decompressed_file.unlink(True)
 
         now = time.monotonic()
         if r := _execute("build/task", "c", file, compressed_file):
