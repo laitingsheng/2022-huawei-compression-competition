@@ -46,11 +46,18 @@ def _main() -> int:
             print("Failed to build the executable.", file=sys.stderr)
             return r
 
+    total_raw_size = 0
+    total_compressed_size = 0
+    total_compress_time = 0
+    total_decompress_time = 0
+
     for file in (args.files or ()):
-        compressed_file = file.with_suffix(".compressed")
+        print(f"{file}:")
+
+        compressed_file = file.with_suffix(file.suffix + ".compressed")
         compressed_file.unlink(True)
 
-        decompressed_file = file.with_suffix(".decompressed")
+        decompressed_file = file.with_suffix(file.suffix + ".decompressed")
         decompressed_file.unlink(True)
 
         now = time.monotonic()
@@ -58,21 +65,34 @@ def _main() -> int:
             print("Failed to compress the file.", file=sys.stderr)
             return r
         compress_time = time.monotonic() - now
-        print(f"Compression took {compress_time:.3f}s")
-        print(f"Compression throughput: {file.stat().st_size / compress_time / (2 << 20):.3f}MB/s")
-        print(f"Ratio: {file.stat().st_size / compressed_file.stat().st_size: .3f}")
+        print(f"    Compression took {compress_time:.3f}s")
+        print(f"    Compression throughput: {file.stat().st_size / compress_time / (2 << 20):.3f}MB/s")
+        print(f"    Ratio: {file.stat().st_size / compressed_file.stat().st_size: .3f}")
+
+        total_raw_size += file.stat().st_size
+        total_compressed_size += compressed_file.stat().st_size
+        total_compress_time += compress_time
 
         now = time.monotonic()
         if r := _execute("build/task", "d", compressed_file, decompressed_file):
             print("Failed to decompress the compressed file.", file=sys.stderr)
             return r
         decompress_time = time.monotonic() - now
-        print(f"Decompression took {decompress_time:.3f}s")
-        print(f"Decompression throughput: {file.stat().st_size / decompress_time / (2 << 20):.3f}MB/s")
+        print(f"    Decompression took {decompress_time:.3f}s")
+        print(f"    Decompression throughput: {file.stat().st_size / decompress_time / (2 << 20):.3f}MB/s")
+
+        total_decompress_time += decompress_time
 
         if not filecmp.cmp(file, decompressed_file, shallow=False):
             print("The decompressed file is not identical to the original file.", file=sys.stderr)
             return 1
+
+        print()
+
+    print("Overall:")
+    print(f"    Compression throughput: {total_raw_size / total_compress_time / (2 << 20):.3f}MB/s")
+    print(f"    Decompression throughput: {total_raw_size / total_decompress_time / (2 << 20):.3f}MB/s")
+    print(f"    Ratio: {total_raw_size / total_compressed_size: .3f}")
 
     return 0
 
