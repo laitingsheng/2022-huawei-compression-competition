@@ -134,19 +134,19 @@ inline int compress(
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::lz4::compress_vector(write_pos, capacity, written, all_yyyy);
+	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_yyyy);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::lz4::compress_vector(write_pos, capacity, written, all_hhhn);
+	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_hhhn);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::lz4::compress_vector(write_pos, capacity, written, all_nnww);
+	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_nnww);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::lz4::compress_vector(write_pos, capacity, written, all_wppp);
+	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_wppp);
 	if (!write_pos)
 		return 1;
 
@@ -252,22 +252,22 @@ inline static int decompress(
 
 	std::vector<uint16_t> buffer(line_count);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
+	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
 	from_vector(buffer, sep, output + 5);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
+	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
 	from_vector(buffer, sep, output + 10);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
+	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
 	from_vector(buffer, sep, output + 15);
 
-	read_pos = utils::lz4::decompress_vector(read_pos, buffer);
+	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
 	if (!read_pos)
 		return 1;
 	from_vector(buffer, '\n', output + 20);

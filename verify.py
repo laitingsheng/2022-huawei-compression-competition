@@ -37,7 +37,7 @@ def _main() -> int:
     args = parser.parse_args()
 
     if args.generate:
-        if r := _execute("cmake", "-G", "Ninja", "-B", "build", ".", "-DCMAKE_BUILD_TYPE=Release"):
+        if r := _execute("cmake", "--toolchain", "toolchains/gnu/host.cmake", "-G", "Ninja", "-B", "build", ".", "-DCMAKE_BUILD_TYPE=Release"):
             print("Failed to generate build files.", file=sys.stderr)
             return r
 
@@ -89,10 +89,11 @@ def _main() -> int:
 
         print()
 
-    print("Overall:")
-    print(f"    Compression throughput: {total_raw_size / total_compress_time / (2 << 20):.3f}MB/s")
-    print(f"    Decompression throughput: {total_raw_size / total_decompress_time / (2 << 20):.3f}MB/s")
-    print(f"    Ratio: {total_raw_size / total_compressed_size: .3f}")
+    if args.files:
+        print("Overall:")
+        print(f"    Compression throughput: {total_raw_size / total_compress_time / (2 << 20):.3f}MB/s")
+        print(f"    Decompression throughput: {total_raw_size / total_decompress_time / (2 << 20):.3f}MB/s")
+        print(f"    Ratio: {total_raw_size / total_compressed_size: .3f}")
 
     return 0
 

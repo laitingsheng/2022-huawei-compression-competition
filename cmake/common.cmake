@@ -4,3 +4,16 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(NOT CMAKE_BUILD_TYPE)
+	set(CMAKE_BUILD_TYPE Release)
+endif()
+
+set(C_CXX_COMMON_FLAGS "-Wall -Wextra -Wpedantic")
+set(C_CXX_COMMON_FLAGS_RELEASE "-O3 -fdata-sections -ffunction-sections -fuse-linker-plugin -Wl,--gc-sections -flto")
+
+set(CMAKE_C_FLAGS ${C_CXX_COMMON_FLAGS})
+set(CMAKE_CXX_FLAGS ${C_CXX_COMMON_FLAGS})
+set(CMAKE_C_FLAGS_RELEASE ${C_CXX_COMMON_FLAGS_RELEASE})
+set(CMAKE_CXX_FLAGS_RELEASE ${C_CXX_COMMON_FLAGS_RELEASE})
+set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++ -static")
