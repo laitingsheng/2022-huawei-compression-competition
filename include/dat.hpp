@@ -9,8 +9,6 @@
 
 #include <fmt/core.h>
 
-#include "lz4.h"
-#include "lz4hc.h"
 #include "utils.hpp"
 
 namespace dat
@@ -158,7 +156,7 @@ inline static int compress(
 
 	for (const auto & column : columns)
 	{
-		write_pos = utils::lz4::compress_vector(write_pos, capacity, written, column);
+		write_pos = utils::fl2::compress_vector(write_pos, capacity, written, column);
 		if (!write_pos)
 			return 1;
 	}
@@ -276,14 +274,14 @@ inline static int decompress(
 
 	for (uint32_t i = 1; i < 59; ++i)
 	{
-		read_pos = utils::lz4::decompress_vector(read_pos, columns[i]);
+		read_pos = utils::fl2::decompress_vector(read_pos, columns[i]);
 		if (!read_pos)
 			return 1;
 	}
 
 	for (uint32_t i = 60; i < 70; ++i)
 	{
-		read_pos = utils::lz4::decompress_vector(read_pos, columns[i]);
+		read_pos = utils::fl2::decompress_vector(read_pos, columns[i]);
 		if (!read_pos)
 			return 1;
 	}
