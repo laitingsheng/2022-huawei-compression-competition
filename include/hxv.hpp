@@ -97,8 +97,8 @@ inline int compress(
 	uint32_t & written
 )
 {
-	utils::counter::simple<uint8_t, uint32_t> ss_counter;
 	utils::counter::differential<uint8_t, int16_t, uint32_t> nn_counter;
+	std::vector<uint8_t> all_ss;
 	std::vector<uint16_t> all_yyyy, all_hhhn, all_nnww, all_wppp;
 
 	line_count = 0;
@@ -111,9 +111,9 @@ inline int compress(
 			return 1;
 
 
-		ss_counter.add(ss);
 		nn_counter.add(nn);
 
+		all_ss.push_back(ss);
 		all_yyyy.push_back(yyyy);
 		all_hhhn.push_back(hhhn);
 		all_nnww.push_back(nnww);
@@ -121,32 +121,32 @@ inline int compress(
 
 		++line_count;
 	}
-	ss_counter.commit();
 	nn_counter.commit();
 
+	utils::fl2::compressor compressor;
 	written = 0;
 
-	auto write_pos = utils::counter::write(output, capacity, written, ss_counter.data());
+	auto write_pos = utils::counter::write(output, capacity, written, nn_counter.data());
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::counter::write(write_pos, capacity, written, nn_counter.data());
+	write_pos = compressor(write_pos, capacity, written, all_ss);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_yyyy);
+	write_pos = compressor(write_pos, capacity, written, all_yyyy);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_hhhn);
+	write_pos = compressor(write_pos, capacity, written, all_hhhn);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_nnww);
+	write_pos = compressor(write_pos, capacity, written, all_nnww);
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::fl2::compress_vector(write_pos, capacity, written, all_wppp);
+	write_pos = compressor(write_pos, capacity, written, all_wppp);
 	if (!write_pos)
 		return 1;
 
@@ -215,13 +215,27 @@ inline static const char * from_differential_counter(const char * read_pos, char
 	return read_pos;
 }
 
+template<typename T>
 [[using gnu : always_inline, hot]]
-inline static void from_vector(const std::vector<uint16_t> & data, char sep, char * write_pos)
+inline static void from_vector(const std::vector<T> & data, char * write_pos)
 {
 	for (uint32_t i = 0; i < data.size(); ++i)
 	{
 		to_hex_chars(data[i], write_pos);
-		*(write_pos + 4) = sep;
+		write_pos += 25;
+	}
+}
+
+template<typename T>
+[[using gnu : always_inline, hot]]
+inline static void from_vector(const std::vector<T> & data, char sep, char * write_pos)
+{
+	constexpr auto cell_width = sizeof(T) * 2;
+
+	for (uint32_t i = 0; i < data.size(); ++i)
+	{
+		to_hex_chars(data[i], write_pos);
+		*(write_pos + cell_width) = sep;
 		write_pos += 25;
 	}
 }
@@ -245,32 +259,40 @@ inline static int decompress(
 	char * output
 )
 {
-	auto read_pos = from_simple_counter(begin, output);
-	read_pos = from_differential_counter(read_pos, output + 2);
+	utils::fl2::decompressor decompressor;
+
+	auto read_pos = from_differential_counter(begin, output + 2);
+
+	std::vector<uint8_t> ss_buffer(line_count);
+
+	read_pos = decompressor(read_pos, ss_buffer);
+	if (!read_pos)
+		return 1;
+	from_vector(ss_buffer, output);
 
 	write_separator(sep, line_count, output + 4);
 
-	std::vector<uint16_t> buffer(line_count);
+	std::vector<uint16_t> cell_buffer(line_count);
 
-	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
+	read_pos = decompressor(read_pos, cell_buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, sep, output + 5);
+	from_vector(cell_buffer, sep, output + 5);
 
-	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
+	read_pos = decompressor(read_pos, cell_buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, sep, output + 10);
+	from_vector(cell_buffer, sep, output + 10);
 
-	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
+	read_pos = decompressor(read_pos, cell_buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, sep, output + 15);
+	from_vector(cell_buffer, sep, output + 15);
 
-	read_pos = utils::fl2::decompress_vector(read_pos, buffer);
+	read_pos = decompressor(read_pos, cell_buffer);
 	if (!read_pos)
 		return 1;
-	from_vector(buffer, '\n', output + 20);
+	from_vector(cell_buffer, '\n', output + 20);
 
 	return 0;
 }
