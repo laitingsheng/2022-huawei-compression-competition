@@ -5,6 +5,8 @@
 #include <cstdio>
 
 #include <array>
+#include <concepts>
+#include <limits>
 #include <vector>
 
 #include <fmt/core.h>
@@ -45,10 +47,7 @@ inline static const char * float_to_integer(const char * pos, char sep, int64_t 
 	}
 
 	for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
-	{
-		output *= 10;
-		output += c - '0';
-	}
+		output = output * 10 + (c - '0');
 	if (c != '.')
 	{
 		fmt::print(stderr, "Unprocessable integer part of the floating point.\n");
@@ -57,10 +56,7 @@ inline static const char * float_to_integer(const char * pos, char sep, int64_t 
 
 	uint8_t parsed_mantissa_width = 0;
 	for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
-	{
-		output *= 10;
-		output += c - '0';
-	}
+		output = output * 10 + (c - '0');
 	if (c != sep)
 	{
 		fmt::print(stderr, "Unprocessable mantissa part of the floating point.\n");
@@ -116,8 +112,7 @@ inline static int compress(
 {
 	std::array<int64_t, 71> line;
 	utils::counter::differential<int64_t, int64_t, uint32_t> counter0;
-	utils::counter::simple<int64_t, uint32_t> counter59, counter70;
-	std::array<std::vector<int64_t>, 68> columns;
+	std::array<std::vector<int64_t>, 70> columns;
 
 	line_count = 0;
 	for (auto pos = begin; pos < end;)
@@ -127,62 +122,28 @@ inline static int compress(
 			return 1;
 
 		counter0.add(line[0]);
-		for (uint32_t i = 0; i < 58; ++i)
+		for (uint32_t i = 0; i < 70; ++i)
 			columns[i].push_back(line[i + 1]);
-		counter59.add(line[59]);
-		for (uint32_t i = 58; i < 68; ++i)
-			columns[i].push_back(line[i + 2]);
-		counter70.add(line[70]);
 
 		++line_count;
 	}
 	counter0.commit();
-	counter59.commit();
-	counter70.commit();
 
+	utils::fl2::compressor compressor;
 	written = 0;
 
 	auto write_pos = utils::counter::write(output, capacity, written, counter0.data());
 	if (!write_pos)
 		return 1;
 
-	write_pos = utils::counter::write(write_pos, capacity, written, counter59.data());
-	if (!write_pos)
-		return 1;
-
-	write_pos = utils::counter::write(write_pos, capacity, written, counter70.data());
-	if (!write_pos)
-		return 1;
-
 	for (const auto & column : columns)
 	{
-		write_pos = utils::fl2::compress_vector(write_pos, capacity, written, column);
+		write_pos = compressor(write_pos, capacity, written, column);
 		if (!write_pos)
 			return 1;
 	}
 
 	return 0;
-}
-
-[[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline static const char * from_simple_counter(const char * read_pos, std::vector<int64_t> & output)
-{
-	auto size = *reinterpret_cast<const uint32_t *>(read_pos);
-	read_pos += 4;
-
-	for (uint32_t i = 0, line = 0; i < size; ++i)
-	{
-		auto value = *reinterpret_cast<const int64_t *>(read_pos);
-		read_pos += 8;
-		auto count = *reinterpret_cast<const uint32_t *>(read_pos);
-		read_pos += 4;
-
-		for (uint32_t j = 0; j < count; ++j)
-			output[line++] = value;
-	}
-
-	return read_pos;
 }
 
 [[nodiscard]]
@@ -256,6 +217,8 @@ inline static int decompress(
 	char * output
 )
 {
+	utils::fl2::decompressor decompressor;
+
 	std::array<std::vector<int64_t>, 71> columns;
 	for (auto & column : columns)
 		column.resize(line_count);
@@ -264,24 +227,9 @@ inline static int decompress(
 	if (!read_pos)
 		return 1;
 
-	read_pos = from_simple_counter(read_pos, columns[59]);
-	if (!read_pos)
-		return 1;
-
-	read_pos = from_simple_counter(read_pos, columns[70]);
-	if (!read_pos)
-		return 1;
-
-	for (uint32_t i = 1; i < 59; ++i)
+	for (uint32_t i = 1; i < 71; ++i)
 	{
-		read_pos = utils::fl2::decompress_vector(read_pos, columns[i]);
-		if (!read_pos)
-			return 1;
-	}
-
-	for (uint32_t i = 60; i < 70; ++i)
-	{
-		read_pos = utils::fl2::decompress_vector(read_pos, columns[i]);
+		read_pos = decompressor(read_pos, columns[i]);
 		if (!read_pos)
 			return 1;
 	}

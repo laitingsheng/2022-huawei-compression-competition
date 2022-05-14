@@ -1,21 +1,10 @@
-#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 
-#include <charconv>
 #include <filesystem>
-#include <fstream>
-#include <limits>
-#include <stdexcept>
 #include <string>
-#include <system_error>
-#include <type_traits>
-#include <utility>
-#include <vector>
 
 #include <fmt/core.h>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <mio/mmap.hpp>
 
 #include "dat.hpp"
