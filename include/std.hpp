@@ -1,0 +1,83 @@
+#ifndef __UTILS_COMPLEMENTS_HPP__
+#define __UTILS_COMPLEMENTS_HPP__
+
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <type_traits>
+
+namespace std
+{
+
+template<typename T>
+concept regular_type = is_object_v<T>;
+
+template<typename T>
+concept reference_type = is_reference_v<T>;
+
+template<typename T>
+concept const_type = is_const_v<T>;
+
+template<typename T>
+concept volatile_type = is_volatile_v<T>;
+
+template<typename T>
+struct is_char_type : false_type {};
+
+template<>
+struct is_char_type<char> : true_type {};
+
+template<>
+struct is_char_type<wchar_t> : true_type {};
+
+template<>
+struct is_char_type<char8_t> : true_type {};
+
+template<>
+struct is_char_type<char16_t> : true_type {};
+
+template<>
+struct is_char_type<char32_t> : true_type {};
+
+template<typename T>
+inline constexpr bool is_char_type_v = is_char_type<T>::value;
+
+template<typename T>
+concept char_type = is_char_type_v<T>;
+
+template<typename Path>
+struct is_path_like : false_type {};
+
+template<reference_type Path>
+struct is_path_like<Path> : is_path_like<remove_reference_t<Path>> {};
+
+template<const_type Path>
+struct is_path_like<Path> : is_path_like<remove_const_t<Path>> {};
+
+template<volatile_type Path>
+struct is_path_like<Path> : is_path_like<remove_volatile_t<Path>> {};
+
+template<char_type C>
+struct is_path_like<const C *> : true_type {};
+
+template<char_type C>
+struct is_path_like<C *> : true_type {};
+
+template<char_type CharT, typename Traits, typename Allocator>
+struct is_path_like<basic_string<CharT, Traits, Allocator>> : true_type {};
+
+template<char_type CharT, typename Traits>
+struct is_path_like<basic_string_view<CharT, Traits>> : true_type {};
+
+template<>
+struct is_path_like<filesystem::path> : true_type {};
+
+template<typename Path>
+inline constexpr bool is_path_like_v = is_path_like<Path>::value;
+
+template<typename Path>
+concept path_like = is_path_like_v<Path>;
+
+}
+
+#endif

@@ -8,6 +8,9 @@ include(fmt)
 include(mio)
 include(lz4)
 include(fast-lzma2)
+include(zstd)
+
+# include(doctest)
 
 include(common)
 
@@ -20,4 +23,5 @@ target_link_libraries(task PRIVATE
 	mio::mio
 	lz4::lz4
 	fl2::fl2
+	libzstd_static
 )
