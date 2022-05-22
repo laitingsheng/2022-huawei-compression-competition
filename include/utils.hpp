@@ -16,10 +16,9 @@
 #include <type_traits>
 #include <utility>
 
-#include <fast-lzma2/fast-lzma2.h>
 #include <fmt/core.h>
-#include <lz4/lz4.h>
-#include <lz4/lz4hc.h>
+#include <zstd.h>
+#include <zstd_errors.h>
 
 namespace std
 {
@@ -212,21 +211,25 @@ inline static size_t write(char * pos, size_t capacity, const std::vector<std::p
 namespace fl2
 {
 
+template<const std::string_view & DICT>
 class compressor final
 {
-	FL2_CCtx * _ctx;
+	ZSTD_CCtx * _ctx;
 	int _level;
 public:
-	compressor() : compressor(FL2_maxHighCLevel()) {}
+	compressor() : compressor(ZSTD_maxCLevel()) {}
 
-	compressor(int level) : _ctx(FL2_createCCtx()), _level(level)
+	compressor(int level) : _ctx(ZSTD_createCCtx()), _level(level)
 	{
-		FL2_CCtx_setParameter(_ctx, FL2_p_highCompression, true);
-		FL2_CCtx_setParameter(_ctx, FL2_p_strategy, FL2_ultra);
-		FL2_CCtx_setParameter(_ctx, FL2_p_literalCtxBits, FL2_LC_MAX);
-		FL2_CCtx_setParameter(_ctx, FL2_p_literalPosBits, FL2_LP_MAX);
-		FL2_CCtx_setParameter(_ctx, FL2_p_posBits, FL2_PB_MAX);
-		FL2_CCtx_setParameter(_ctx, FL2_p_compressionLevel, level);
+		ZSTD_CCtx_setParameter(_ctx, ZSTD_c_compressionLevel, _level);
+		ZSTD_CCtx_setParameter(_ctx, ZSTD_c_strategy, ZSTD_btultra2);
+
+		if constexpr (DICT.size())
+			if (auto ret = ZSTD_CCtx_loadDictionary(_ctx, DICT.data(), DICT.size()); ZSTD_isError(ret))
+				throw std::runtime_error(fmt::format(
+					"failed to load dictionary for compression ({})",
+					ZSTD_getErrorString(ZSTD_getErrorCode(ret))
+				));
 	}
 
 	compressor(const compressor &) = delete;
@@ -234,7 +237,7 @@ public:
 
 	~compressor()
 	{
-		FL2_freeCCtx(_ctx);
+		ZSTD_freeCCtx(_ctx);
 	}
 
 	compressor & operator=(const compressor &) = delete;
@@ -245,7 +248,7 @@ public:
 	[[using gnu : always_inline, hot]]
 	inline size_t operator()(char * pos, size_t capacity, const std::vector<T> & content)
 	{
-		size_t written = FL2_compressCCtx(
+		size_t written = ZSTD_compressCCtx(
 			_ctx,
 			pos + sizeof(size_t),
 			capacity - sizeof(size_t),
@@ -254,8 +257,11 @@ public:
 			_level
 		);
 
-		if (FL2_isError(written))
-			throw std::runtime_error(fmt::format("LZMA2 compression failed ({})", FL2_getErrorName(written)));
+		if (ZSTD_isError(written))
+			throw std::runtime_error(fmt::format(
+				"compression failed ({})",
+				ZSTD_getErrorString(ZSTD_getErrorCode(written))
+			));
 
 		*reinterpret_cast<size_t *>(pos) = written;
 
@@ -263,18 +269,27 @@ public:
 	}
 };
 
+template<const std::string_view & DICT>
 class decompressor final
 {
-	FL2_DCtx * _ctx;
+	ZSTD_DCtx * _ctx;
 public:
-	decompressor() : _ctx(FL2_createDCtx()) {}
+	decompressor() : _ctx(ZSTD_createDCtx())
+	{
+		if constexpr (DICT.size())
+			if (auto ret = ZSTD_DCtx_loadDictionary(_ctx, DICT.data(), DICT.size()); ZSTD_isError(ret))
+				throw std::runtime_error(fmt::format(
+					"failed to load dictionary for decompression ({})",
+					ZSTD_getErrorString(ZSTD_getErrorCode(ret))
+				));
+	}
 
 	decompressor(const decompressor &) = delete;
 	decompressor(decompressor &&) = delete;
 
 	~decompressor()
 	{
-		FL2_freeDCtx(_ctx);
+		ZSTD_freeDCtx(_ctx);
 	}
 
 	decompressor & operator=(const decompressor &) = delete;
@@ -287,7 +302,7 @@ public:
 	{
 		size_t compressed = *reinterpret_cast<const size_t *>(pos);
 
-		size_t extracted = FL2_decompressDCtx(
+		size_t extracted = ZSTD_decompressDCtx(
 			_ctx,
 			output.data(),
 			output.size() * sizeof(T),
@@ -295,8 +310,11 @@ public:
 			compressed
 		);
 
-		if (FL2_isError(extracted))
-			throw std::runtime_error(fmt::format("LZMA2 decompression failed ({})", FL2_getErrorName(extracted)));
+		if (ZSTD_isError(extracted))
+			throw std::runtime_error(fmt::format(
+				"decompression failed ({})",
+				ZSTD_getErrorString(ZSTD_getErrorCode(extracted))
+			));
 
 		return compressed + sizeof(size_t);
 	}

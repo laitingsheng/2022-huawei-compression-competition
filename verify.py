@@ -33,6 +33,13 @@ def _main() -> int:
         action="store_true",
         dest="generate"
     )
+    parser.add_argument(
+        "-t", "--train", "--training-set",
+        action="extend",
+        nargs="+",
+        type=Path,
+        dest="training_set"
+    )
 
     args = parser.parse_args()
 

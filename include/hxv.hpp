@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "dict/hxv.hpp"
 #include "utils.hpp"
 
 namespace hxv
@@ -80,7 +81,7 @@ inline void compress(
 	output += written;
 	capacity -= written;
 
-	utils::fl2::compressor compressor;
+	utils::fl2::compressor<DICT> compressor;
 
 	for (const auto & column : standard_columns)
 	{
@@ -136,7 +137,7 @@ inline static void decompress(const char * begin, char sep, size_t line_count, c
 	auto read_pos = begin + read;
 	write_vector(buffer, output + 2);
 
-	utils::fl2::decompressor decompressor;
+	utils::fl2::decompressor<DICT> decompressor;
 
 	read = decompressor(read_pos, buffer);
 	read_pos += read;

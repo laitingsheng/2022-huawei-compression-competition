@@ -125,6 +125,8 @@ int main(int argc, char * argv[])
 		compress(argv[2], argv[3]);
 	else if (mode == 'd')
 		decompress(argv[2], argv[3]);
+	// else if (mode == 't')
+	// 	train(argv[2], argv[3]);
 	else
 	{
 		fmt::print(stderr, "{}: Invalid arguments supplied.\n", argv[0]);

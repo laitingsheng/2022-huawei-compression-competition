@@ -16,3 +16,6 @@
 [submodule "external/fast-lzma2"]
 	path = external/fast-lzma2
 	url = git@github.com:conor42/fast-lzma2.git
+[submodule "external/zstd"]
+	path = external/zstd
+	url = git@github.com:facebook/zstd.git

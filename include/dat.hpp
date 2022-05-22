@@ -12,8 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/core.h>
-
+#include "dict/dat.hpp"
 #include "utils.hpp"
 
 namespace dat
@@ -109,7 +108,7 @@ inline static void compress(
 	output += written;
 	capacity -= written;
 
-	utils::fl2::compressor compressor;
+	utils::fl2::compressor<DICT> compressor;
 
 	for (const auto & column : standard_columns)
 	{
@@ -173,7 +172,7 @@ inline static void decompress(const char * begin, char sep, size_t line_count, c
 	auto read = utils::counter::reconstruct_differential<int64_t, size_t>(begin, columns[0]);
 	auto read_pos = begin + read;
 
-	utils::fl2::decompressor decompressor;
+	utils::fl2::decompressor<DICT> decompressor;
 
 	for (size_t i = 1; i < 71; ++i)
 	{
