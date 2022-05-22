@@ -1,300 +1,161 @@
 #ifndef __HXV_HPP__
 #define __HXV_HPP__
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 
+#include <concepts>
+#include <stdexcept>
 #include <vector>
-
-#include <fmt/core.h>
 
 #include "utils.hpp"
 
 namespace hxv
 {
 
-template<typename T>
 [[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline static const char * from_hex_chars(const char * input, T & value)
+[[using gnu : always_inline, hot, const]]
+inline static uint8_t from_hex_char(char hex)
 {
-	auto ptr = input;
-
-	T re = 0;
-	for (; ptr < input + 2 * sizeof(T); ++ptr)
-	{
-		char c = *ptr;
-		re = (re << 4) + (c >= 'A' ? c - 'A' + 10 : c - '0');
-	}
-	value = re;
-
-	return ptr;
-}
-
-template<typename T>
-[[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline static const char * from_hex_chars(const char * input, char sep, T & value)
-{
-	auto ptr = from_hex_chars(input, value);
-	if (*ptr++ != sep)
-	{
-		fmt::print(stderr, "Separator mismatched\n");
-		return nullptr;
-	}
-	return ptr;
+	if (hex >= '0' && hex <= '9')
+		return hex - '0';
+	if (hex >= 'A' && hex <= 'F')
+		return hex - 'A' + 10;
+	throw std::invalid_argument("invalid hex character");
 }
 
 [[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline static const char * readline(
-	const char * pos,
-	char sep,
-	uint8_t & ss,
-	uint8_t & nn,
-	uint16_t & yyyy,
-	uint16_t & hhhn,
-	uint16_t & nnww,
-	uint16_t & wppp
-)
+[[using gnu : always_inline, hot, pure]]
+inline static uint8_t from_hex_chars(const char * input)
 {
-	pos = from_hex_chars(pos, ss);
-	if (!pos)
-		return nullptr;
-
-	pos = from_hex_chars(pos, sep, nn);
-	if (!pos)
-		return nullptr;
-
-	pos = from_hex_chars(pos, sep, yyyy);
-	if (!pos)
-		return nullptr;
-
-	pos = from_hex_chars(pos, sep, hhhn);
-	if (!pos)
-		return nullptr;
-
-	pos = from_hex_chars(pos, sep, nnww);
-	if (!pos)
-		return nullptr;
-
-	pos = from_hex_chars(pos, '\n', wppp);
-	if (!pos)
-		return nullptr;
-
-	return pos;
+	return from_hex_char(input[0]) << 4 | from_hex_char(input[1]);
 }
 
-[[nodiscard]]
 [[using gnu : always_inline]]
-inline int compress(
+inline void compress(
 	const char * begin,
 	const char * end,
 	char sep,
-	uint32_t & line_count,
 	char * output,
-	uint32_t capacity,
-	uint32_t & written
+	size_t capacity,
+	size_t & line_count,
+	size_t & total
 )
 {
-	utils::counter::differential<uint8_t, int16_t, uint32_t> nn_counter;
-	std::vector<uint8_t> all_ss;
-	std::vector<uint16_t> all_yyyy, all_hhhn, all_nnww, all_wppp;
-
 	line_count = 0;
+
+	utils::counter::differential<uint8_t, size_t> counter_column1;
+	std::array<std::vector<uint8_t>, 9> standard_columns;
+
 	for (auto pos = begin; pos < end;)
 	{
-		uint8_t ss, nn;
-		uint16_t yyyy, hhhn, nnww, wppp;
-		pos = readline(pos, sep, ss, nn, yyyy, hhhn, nnww, wppp);
-		if (!pos)
-			return 1;
+		standard_columns[0].push_back(from_hex_chars(pos));
+		pos += 2;
 
+		counter_column1.add(from_hex_chars(pos));
+		pos += 2;
 
-		nn_counter.add(nn);
+		if (*pos++ != sep)
+			throw std::invalid_argument("invalid hxv line");
 
-		all_ss.push_back(ss);
-		all_yyyy.push_back(yyyy);
-		all_hhhn.push_back(hhhn);
-		all_nnww.push_back(nnww);
-		all_wppp.push_back(wppp);
+		for (size_t i = 2; i < 10; i += 2)
+		{
+			standard_columns[i - 1].push_back(from_hex_chars(pos));
+			pos += 2;
+
+			standard_columns[i].push_back(from_hex_chars(pos));
+			pos += 2;
+
+			if (*pos++ != (i == 8 ? '\n' : sep))
+				throw std::invalid_argument("invalid hxv line");
+		}
 
 		++line_count;
 	}
-	nn_counter.commit();
+	counter_column1.commit();
+
+	auto written = utils::counter::write(output, capacity, counter_column1.data());
+	total = written;
+	output += written;
+	capacity -= written;
 
 	utils::fl2::compressor compressor;
-	written = 0;
 
-	auto write_pos = utils::counter::write(output, capacity, written, nn_counter.data());
-	if (!write_pos)
-		return 1;
-
-	write_pos = compressor(write_pos, capacity, written, all_ss);
-	if (!write_pos)
-		return 1;
-
-	write_pos = compressor(write_pos, capacity, written, all_yyyy);
-	if (!write_pos)
-		return 1;
-
-	write_pos = compressor(write_pos, capacity, written, all_hhhn);
-	if (!write_pos)
-		return 1;
-
-	write_pos = compressor(write_pos, capacity, written, all_nnww);
-	if (!write_pos)
-		return 1;
-
-	write_pos = compressor(write_pos, capacity, written, all_wppp);
-	if (!write_pos)
-		return 1;
-
-	return 0;
-}
-
-template<typename T>
-[[using gnu : always_inline, hot]]
-inline static void to_hex_chars(T value, char * output)
-{
-	for (auto reverse = output + 2 * sizeof(T) - 1; reverse >= output; --reverse)
+	for (const auto & column : standard_columns)
 	{
-		uint8_t digit = value & 0xF;
-		*reverse = digit < 10 ? '0' + digit : 'A' + digit - 10;
-		value >>= 4;
+		written = compressor(output, capacity, column);
+		total += written;
+		output += written;
+		capacity -= written;
 	}
 }
 
 [[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline static const char * from_simple_counter(const char * read_pos, char * write_pos)
+[[using gnu : always_inline, hot, const]]
+inline static char to_hex_char(uint8_t value)
 {
-	auto size = *reinterpret_cast<const uint32_t *>(read_pos);
-	read_pos += 4;
-
-	for (uint32_t i = 0; i < size; ++i)
-	{
-		auto value = *reinterpret_cast<const uint8_t *>(read_pos);
-		read_pos += 1;
-		auto count = *reinterpret_cast<const uint32_t *>(read_pos);
-		read_pos += 4;
-
-		for (uint32_t j = 0; j < count; ++j)
-		{
-			to_hex_chars(value, write_pos);
-			write_pos += 25;
-		}
-	}
-
-	return read_pos;
+	if (value >= 16)
+		throw std::invalid_argument("invalid hex value");
+	return value < 10 ? '0' + value : 'A' + value - 10;
 }
 
-[[nodiscard]]
 [[using gnu : always_inline, hot]]
-inline static const char * from_differential_counter(const char * read_pos, char * write_pos)
+inline static void to_hex_chars(uint8_t value, char * output)
 {
-	auto size = *reinterpret_cast<const uint32_t *>(read_pos);
-	read_pos += 4;
-
-	uint8_t value = 0;
-	for (uint32_t i = 0; i < size; ++i)
-	{
-		auto diff = *reinterpret_cast<const uint8_t *>(read_pos);
-		read_pos += 1;
-		auto count = *reinterpret_cast<const uint32_t *>(read_pos);
-		read_pos += 4;
-
-		for (uint32_t j = 0; j < count; ++j)
-		{
-			value += diff;
-			to_hex_chars(value, write_pos);
-			write_pos += 25;
-		}
-	}
-
-	return read_pos;
+	output[0] = to_hex_char(value >> 4);
+	output[1] = to_hex_char(value & 0xF);
 }
 
-template<typename T>
 [[using gnu : always_inline, hot]]
-inline static void from_vector(const std::vector<T> & data, char * write_pos)
+inline static void write_vector(const std::vector<uint8_t> & data, char * write_pos)
 {
-	for (uint32_t i = 0; i < data.size(); ++i)
+	for (size_t i = 0; i < data.size(); ++i)
 	{
 		to_hex_chars(data[i], write_pos);
 		write_pos += 25;
 	}
 }
 
-template<typename T>
 [[using gnu : always_inline, hot]]
-inline static void from_vector(const std::vector<T> & data, char sep, char * write_pos)
+inline static void write_separator(char sep, size_t count, char * write_pos)
 {
-	constexpr auto cell_width = sizeof(T) * 2;
-
-	for (uint32_t i = 0; i < data.size(); ++i)
-	{
-		to_hex_chars(data[i], write_pos);
-		*(write_pos + cell_width) = sep;
-		write_pos += 25;
-	}
-}
-
-[[using gnu : always_inline, hot]]
-inline static void write_separator(char sep, uint32_t count, char * write_pos)
-{
-	for (uint32_t i = 0; i < count; ++i)
+	for (size_t i = 0; i < count; ++i)
 	{
 		*write_pos = sep;
 		write_pos += 25;
 	}
 }
 
-[[nodiscard]]
 [[using gnu : always_inline]]
-inline static int decompress(
-	const char * begin,
-	char sep,
-	uint32_t line_count,
-	char * output
-)
+inline static void decompress(const char * begin, char sep, size_t line_count, char * output)
 {
+	std::vector<uint8_t> buffer(line_count);
+
+	auto read = utils::counter::reconstruct_differential<uint8_t, size_t>(begin, buffer);
+	auto read_pos = begin + read;
+	write_vector(buffer, output + 2);
+
 	utils::fl2::decompressor decompressor;
 
-	auto read_pos = from_differential_counter(begin, output + 2);
-
-	std::vector<uint8_t> ss_buffer(line_count);
-
-	read_pos = decompressor(read_pos, ss_buffer);
-	if (!read_pos)
-		return 1;
-	from_vector(ss_buffer, output);
+	read = decompressor(read_pos, buffer);
+	read_pos += read;
+	write_vector(buffer, output);
 
 	write_separator(sep, line_count, output + 4);
 
-	std::vector<uint16_t> cell_buffer(line_count);
+	for (size_t offset = 5; offset < 25; offset += 5)
+	{
+		read = decompressor(read_pos, buffer);
+		read_pos += read;
+		write_vector(buffer, output + offset);
 
-	read_pos = decompressor(read_pos, cell_buffer);
-	if (!read_pos)
-		return 1;
-	from_vector(cell_buffer, sep, output + 5);
+		read = decompressor(read_pos, buffer);
+		read_pos += read;
+		write_vector(buffer, output + offset + 2);
 
-	read_pos = decompressor(read_pos, cell_buffer);
-	if (!read_pos)
-		return 1;
-	from_vector(cell_buffer, sep, output + 10);
-
-	read_pos = decompressor(read_pos, cell_buffer);
-	if (!read_pos)
-		return 1;
-	from_vector(cell_buffer, sep, output + 15);
-
-	read_pos = decompressor(read_pos, cell_buffer);
-	if (!read_pos)
-		return 1;
-	from_vector(cell_buffer, '\n', output + 20);
-
-	return 0;
+		write_separator(offset == 20 ? '\n' : sep, line_count, output + offset + 4);
+	}
 }
 
 }
