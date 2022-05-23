@@ -121,10 +121,13 @@ public:
 	void add(T new_value)
 	{
 		if (T current_diff = new_value - value; current_diff == diff)
+		[[likely]]
 			++count;
 		else
+		[[unlikely]]
 		{
 			if (count)
+			[[likely]]
 				counter.emplace_back(diff, count);
 			diff = current_diff;
 			count = 1;
@@ -135,6 +138,7 @@ public:
 	void commit()
 	{
 		if (count)
+		[[likely]]
 			counter.emplace_back(diff, count);
 	}
 
@@ -164,6 +168,7 @@ inline static size_t reconstruct_differential(const char * read_pos, std::vector
 
 	T value = 0;
 	for (SizeT i = 0, index = 0; i < size; ++i)
+	[[likely]]
 	{
 		auto diff = *reinterpret_cast<const T *>(read_pos);
 		read_pos += sizeof(T);
@@ -171,6 +176,7 @@ inline static size_t reconstruct_differential(const char * read_pos, std::vector
 		read_pos += sizeof(SizeT);
 
 		for (SizeT j = 0; j < count; ++j, ++index)
+		[[likely]]
 		{
 			value += diff;
 			vector[index] = value;
@@ -190,12 +196,14 @@ inline static size_t write(char * pos, size_t capacity, const std::vector<std::p
 	size_t total = sizeof(SizeT) + counter.size() * (sizeof(T) + sizeof(SizeT));
 
 	if (total > capacity)
+	[[unlikely]]
 		throw new std::runtime_error("not enough space to serialise the counter");
 
 	*reinterpret_cast<SizeT *>(pos) = counter.size();
 	pos += sizeof(SizeT);
 
 	for (const auto & [value, count] : counter)
+	[[likely]]
 	{
 		*reinterpret_cast<T *>(pos) = value;
 		pos += sizeof(T);
@@ -226,6 +234,7 @@ public:
 
 		if constexpr (DICT.size())
 			if (auto ret = ZSTD_CCtx_loadDictionary(_ctx, DICT.data(), DICT.size()); ZSTD_isError(ret))
+			[[unlikely]]
 				throw std::runtime_error(fmt::format(
 					"failed to load dictionary for compression ({})",
 					ZSTD_getErrorString(ZSTD_getErrorCode(ret))
@@ -258,6 +267,7 @@ public:
 		);
 
 		if (ZSTD_isError(written))
+		[[unlikely]]
 			throw std::runtime_error(fmt::format(
 				"compression failed ({})",
 				ZSTD_getErrorString(ZSTD_getErrorCode(written))
@@ -278,6 +288,7 @@ public:
 	{
 		if constexpr (DICT.size())
 			if (auto ret = ZSTD_DCtx_loadDictionary(_ctx, DICT.data(), DICT.size()); ZSTD_isError(ret))
+			[[unlikely]]
 				throw std::runtime_error(fmt::format(
 					"failed to load dictionary for decompression ({})",
 					ZSTD_getErrorString(ZSTD_getErrorCode(ret))
@@ -311,6 +322,7 @@ public:
 		);
 
 		if (ZSTD_isError(extracted))
+		[[unlikely]]
 			throw std::runtime_error(fmt::format(
 				"decompression failed ({})",
 				ZSTD_getErrorString(ZSTD_getErrorCode(extracted))
@@ -320,6 +332,170 @@ public:
 	}
 };
 
+}
+
+}
+
+namespace hxv
+{
+
+[[nodiscard]]
+[[using gnu : always_inline, hot, const]]
+inline static uint8_t from_hex_char(char hex)
+{
+	if (hex >= '0' && hex <= '9')
+		return hex - '0';
+	else if (hex >= 'A' && hex <= 'F')
+		return hex - 'A' + 10;
+	else
+	[[unlikely]]
+		throw std::invalid_argument("invalid hex character");
+}
+
+[[nodiscard]]
+[[using gnu : always_inline, hot, pure]]
+inline static uint8_t from_hex_chars(const char * input)
+{
+	return from_hex_char(input[0]) << 4 | from_hex_char(input[1]);
+}
+
+[[nodiscard]]
+[[using gnu : always_inline, hot, const]]
+inline static char to_hex_char(uint8_t value)
+{
+	if (value >= 16)
+	[[unlikely]]
+		throw std::invalid_argument("invalid hex value");
+	else
+	[[likely]]
+		return value < 10 ? '0' + value : 'A' + value - 10;
+}
+
+[[using gnu : always_inline, hot]]
+inline static void to_hex_chars(uint8_t value, char * output)
+{
+	output[0] = to_hex_char(value >> 4);
+	output[1] = to_hex_char(value & 0xF);
+}
+
+[[using gnu : always_inline, hot]]
+inline static void write_vector(const std::vector<uint8_t> & data, char * write_pos)
+{
+	for (size_t i = 0; i < data.size(); ++i)
+	[[likely]]
+	{
+		to_hex_chars(data[i], write_pos);
+		write_pos += 25;
+	}
+}
+
+[[using gnu : always_inline, hot]]
+inline static void write_separator(char sep, size_t count, char * write_pos)
+{
+	for (size_t i = 0; i < count; ++i)
+	[[likely]]
+	{
+		*write_pos = sep;
+		write_pos += 25;
+	}
+}
+
+}
+
+namespace dat
+{
+
+template<uint8_t mantissa_width, std::signed_integral T>
+[[nodiscard]]
+[[using gnu : always_inline, hot, pure]]
+inline static std::pair<T, uint8_t> float_to_integer(const char * pos)
+{
+	constexpr uint8_t max_digits = std::numeric_limits<T>::digits10;
+	static_assert(max_digits > mantissa_width, "T cannot hold the floating point number");
+
+	constexpr uint8_t max_integer_width = max_digits - mantissa_width;
+
+	bool sign;
+	uint8_t integer_width;
+	T output;
+	char c = *pos++;
+	if (c == '-')
+	{
+		sign = true;
+		integer_width = 0;
+		output = 0;
+	}
+	else if (isdigit(c))
+	{
+		sign = false;
+		integer_width = 1;
+		output = c - '0';
+	}
+	else
+	[[unlikely]]
+		throw std::runtime_error("invalid leading character of the floating point number");
+
+	for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
+	[[likely]]
+		output = output * 10 + (c - '0');
+
+	if (c != '.')
+	[[unlikely]]
+		throw std::runtime_error("unprocessable integer part of the floating point");
+
+	uint8_t parsed_mantissa_width = 0;
+	for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
+	[[likely]]
+		output = output * 10 + (c - '0');
+
+	if (sign)
+		output |= std::numeric_limits<T>::min();
+
+	return { output, integer_width + mantissa_width + sign + 1 };
+}
+
+template<uint8_t mantissa_width, std::signed_integral T>
+[[nodiscard]]
+[[using gnu : always_inline, hot]]
+inline uint8_t write_integer_as_float(int64_t number, char * write_pos)
+{
+	constexpr T sign_mask = std::numeric_limits<T>::min();
+
+	bool sign = number & sign_mask;
+	if (sign)
+	{
+		*write_pos++ = '-';
+		number &= ~sign_mask;
+	}
+
+	constexpr uint8_t max_length = std::numeric_limits<T>::digits10 + 1;
+
+	std::array<char, max_length> buffer;
+
+	uint8_t index = max_length;
+	for (uint8_t i = 0; i < mantissa_width; ++i)
+	[[likely]]
+	{
+		buffer[--index] = '0' + number % 10;
+		number /= 10;
+	}
+
+	buffer[--index] = '.';
+
+	if (number > 0)
+	{
+		while (number > 0)
+		{
+			buffer[--index] = '0' + number % 10;
+			number /= 10;
+		}
+	}
+	else
+		buffer[--index] = '0';
+
+	std::copy(buffer.begin() + index, buffer.end(), write_pos);
+
+	return max_length - index + sign;
 }
 
 }
