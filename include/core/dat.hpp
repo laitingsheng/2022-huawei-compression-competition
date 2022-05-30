@@ -20,8 +20,8 @@
 #include <mio/mmap.hpp>
 
 #include "../utils/counter.hpp"
+#include "../utils/fl2.hpp"
 #include "../utils/utils.hpp"
-#include "../utils/zstd.hpp"
 
 namespace core::dat
 {
@@ -156,7 +156,7 @@ inline static SizeT compress(const char * read_pos, size_t read_size, char * wri
 	size += written;
 	write_capacity -= written;
 
-	utils::zstd::compressor compressor;
+	utils::fl2::compressor compressor;
 
 	for (const auto & column : standard_columns)
 	{
@@ -167,91 +167,6 @@ inline static SizeT compress(const char * read_pos, size_t read_size, char * wri
 	}
 
 	return size;
-}
-
-template<size_t segment_count, size_t max_dict_size>
-[[using gnu : always_inline]]
-inline static void train_dict(const char * read_pos, size_t read_size, const std::string & dest_path)
-{
-	static constexpr size_t column_count = 71;
-
-	std::array<std::vector<int64_t>, column_count> columns;
-	size_t line_count = 0, read = 0;
-	while (read < read_size)
-	[[likely]]
-	{
-		{
-			auto [output, offset] = parse_cell<int64_t, 3, ' '>(read_pos);
-			columns[0].push_back(output);
-			read_pos += offset;
-			read += offset;
-		}
-
-		for (size_t i = 1; i < 70; ++i)
-		[[likely]]
-		{
-			auto [output, offset] = parse_cell<int64_t, 5, ' '>(read_pos);
-			columns[i].push_back(output);
-			read_pos += offset;
-			read += offset;
-		}
-
-		{
-			auto [output, offset] = parse_cell<int64_t, 5, '\r'>(read_pos);
-			columns[70].push_back(output);
-			read_pos += offset;
-			read += offset;
-		}
-
-		if (char c = *read_pos++; c != '\n')
-		[[unlikely]]
-			throw std::runtime_error(fmt::format(FMT_STRING("expect 0x0a, got {:#02x}"), c));
-		++read;
-
-		++line_count;
-	}
-
-	if (read != read_size)
-	[[unlikely]]
-		throw std::runtime_error("unexpected end of file");
-
-	std::vector<std::string> lines;
-	lines.resize(column_count);
-	for (size_t i = 0; i < column_count; ++i)
-	{
-		const auto dict = utils::zstd::train<int64_t, segment_count, max_dict_size>(columns[i]);
-
-		auto & line = lines[i];
-		line.reserve(dict.size() * 4 + 100);
-
-		line.append("std::string_view { \"");
-
-		for (auto byte : dict)
-			line.append(fmt::format(FMT_STRING("\\x{:02x}"), byte));
-
-		line.append(fmt::format(FMT_STRING("\", {} }}"), dict.size()));
-	}
-
-	auto source = fmt::format(
-		FMT_STRING(R"source(// Generated automatically
-#ifndef __CORE_DICT_HXV_HPP__
-#define __CORE_DICT_HXV_HPP__
-
-#include <array>
-#include <string_view>
-
-inline static constexpr std::array DICTS {{
-	{}
-}};
-
-#endif
-)source"),
-		fmt::join(lines, ",\n\t")
-	);
-
-	utils::blank_file(dest_path, source.size());
-	auto dest = mio::mmap_sink(dest_path);
-	std::copy(source.begin(), source.end(), dest.data());
 }
 
 template<std::signed_integral T, size_t mantissa_width>
@@ -315,7 +230,7 @@ inline static void decompress(const char * read_pos, size_t read_size, const std
 	read_pos += read;
 	read_size -= read;
 
-	utils::zstd::decompressor decompressor;
+	utils::fl2::decompressor decompressor;
 
 	for (size_t i = 1; i < 71; ++i)
 	{

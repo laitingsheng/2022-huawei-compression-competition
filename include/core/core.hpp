@@ -33,19 +33,6 @@ inline static void compress(const std::string & source_path, const std::string &
 	std::filesystem::resize_file(dest_path, size);
 }
 
-inline static void train(const std::string & source_path, const std::string & dest_path)
-{
-	auto source = mio::mmap_source(source_path);
-
-	if (std::string extension = std::filesystem::path(source_path).extension(); extension == ".dat")
-		dat::train_dict<16, 100000>(source.data(), source.size(), dest_path);
-	else if (extension == ".hxv")
-		hxv::train_dict<16, 100000>(source.data(), source.size(), dest_path);
-	else
-	[[unlikely]]
-		throw std::runtime_error("unexpected file type");
-}
-
 template<std::unsigned_integral SizeT>
 [[using gnu : always_inline]]
 inline static void decompress(const std::string & source_path, const std::string & dest_path)

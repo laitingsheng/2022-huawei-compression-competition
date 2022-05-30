@@ -14,8 +14,6 @@ int main(int argc, char * argv[])
 		core::compress<uint32_t>(argv[2], argv[3]);
 	else if (mode == 'd')
 		core::decompress<uint32_t>(argv[2], argv[3]);
-	else if (mode == 't')
-		core::train(argv[2], argv[3]);
 	else
 	[[unlikely]]
 		throw std::runtime_error("invalid arguments supplied");

@@ -43,16 +43,16 @@ public:
 			throw std::bad_alloc();
 
 		CHECK_FL2_RETURN(
+			FL2_CCtx_setParameter(_ctx, FL2_p_compressionLevel, level),
+			"failed to set compression level"
+		)
+		CHECK_FL2_RETURN(
 			FL2_CCtx_setParameter(_ctx, FL2_p_highCompression, true),
 			"failed to set high compression"
 		)
 		CHECK_FL2_RETURN(
 			FL2_CCtx_setParameter(_ctx, FL2_p_strategy, FL2_ultra),
 			"failed to set strategy"
-		)
-		CHECK_FL2_RETURN(
-			FL2_CCtx_setParameter(_ctx, FL2_p_compressionLevel, level),
-			"failed to set compression level"
 		)
 	}
 
