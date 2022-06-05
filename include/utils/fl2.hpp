@@ -35,9 +35,7 @@ class compressor final
 	FL2_CCtx * _ctx;
 	int _level;
 public:
-	explicit compressor() : compressor(FL2_maxHighCLevel()) {}
-
-	explicit compressor(int level) : _ctx(FL2_createCCtx()), _level(level)
+	explicit compressor(int level = FL2_maxHighCLevel()) : _ctx(FL2_createCCtx()), _level(level)
 	{
 		if (_ctx == nullptr)
 			throw std::bad_alloc();
@@ -67,26 +65,21 @@ public:
 	compressor & operator=(const compressor &) = delete;
 	compressor & operator=(compressor &&) = delete;
 
-	template<std::integral T, std::unsigned_integral SizeT>
+	template<std::integral T>
 	[[nodiscard]]
-	[[using gnu : always_inline, hot]]
-	inline size_t process(char * pos, size_t capacity, const std::vector<T> & content)
+	inline size_t operator()(char * pos, size_t capacity, const std::vector<T> & content)
 	{
 		size_t written = FL2_compressCCtx(
 			_ctx,
-			pos + sizeof(SizeT), capacity - sizeof(SizeT),
+			pos + sizeof(size_t), capacity - sizeof(size_t),
 			content.data(), content.size() * sizeof(T),
 			_level
 		);
 		CHECK_FL2_RETURN(written, "failed to compress data")
 
-		if constexpr (!std::is_same_v<SizeT, size_t>)
-			if (written > std::numeric_limits<SizeT>::max())
-				throw std::runtime_error("compressed data is larger than expected");
+		*reinterpret_cast<size_t *>(pos) = written;
 
-		*reinterpret_cast<SizeT *>(pos) = written;
-
-		return written + sizeof(SizeT);
+		return written + sizeof(size_t);
 	}
 };
 
@@ -114,25 +107,24 @@ public:
 	decompressor & operator=(const decompressor &) = delete;
 	decompressor & operator=(decompressor &&) = delete;
 
-	template<std::integral T, std::unsigned_integral SizeT>
+	template<std::integral T>
 	[[nodiscard]]
-	[[using gnu : always_inline, hot]]
-	inline size_t process(const char * pos, size_t size, std::vector<T> & output)
+	inline size_t operator()(const char * pos, size_t size, std::vector<T> & output)
 	{
-		auto compressed = *reinterpret_cast<const SizeT *>(pos);
-		if (compressed > size - sizeof(SizeT))
+		auto compressed = *reinterpret_cast<const size_t *>(pos);
+		if (compressed > size - sizeof(size_t))
 			throw std::runtime_error("corrupted compressed file");
 
 		CHECK_FL2_RETURN(
 			FL2_decompressDCtx(
 				_ctx,
 				output.data(), output.size() * sizeof(T),
-				pos + sizeof(SizeT), compressed
+				pos + sizeof(size_t), compressed
 			),
 			"failed to decompress data"
 		)
 
-		return compressed + sizeof(SizeT);
+		return compressed + sizeof(size_t);
 	}
 };
 

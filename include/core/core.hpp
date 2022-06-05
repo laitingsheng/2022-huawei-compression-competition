@@ -6,6 +6,7 @@
 
 #include <mio/mmap.hpp>
 
+#include "../utils/fl2.hpp"
 #include "../utils/utils.hpp"
 #include "./dat.hpp"
 #include "./hxv.hpp"
@@ -13,27 +14,19 @@
 namespace core
 {
 
-template<std::unsigned_integral SizeT>
 [[using gnu : always_inline]]
 inline static void compress(const std::string & source_path, const std::string & dest_path)
 {
 	auto source = mio::mmap_source(source_path);
-	utils::blank_file(dest_path, source.size());
-	auto dest = mio::mmap_sink(dest_path);
-
-	size_t size;
 	if (std::string extension = std::filesystem::path(source_path).extension(); extension == ".dat")
-		size = dat::compress<SizeT>(source.data(), source.size(), dest.data(), dest.size());
+		dat::data::parse(source.data(), source.size()).compress(utils::fl2::compressor(), dest_path);
 	else if (extension == ".hxv")
-		size = hxv::compress<SizeT>(source.data(), source.size(), dest.data(), dest.size());
+		hxv::data::parse(source.data(), source.size()).compress(utils::fl2::compressor(), dest_path);
 	else
 	[[unlikely]]
 		throw std::runtime_error("unexpected file type");
-
-	std::filesystem::resize_file(dest_path, size);
 }
 
-template<std::unsigned_integral SizeT>
 [[using gnu : always_inline]]
 inline static void decompress(const std::string & source_path, const std::string & dest_path)
 {
@@ -41,9 +34,9 @@ inline static void decompress(const std::string & source_path, const std::string
 	auto read_pos = source.data();
 
 	if (auto file_type = static_cast<utils::file_type>(*read_pos++); file_type == utils::file_type::dat)
-		dat::decompress<SizeT>(read_pos, source.size() - 1, dest_path);
+		dat::data::decompress(utils::fl2::decompressor(), read_pos, source.size() - 1).write(dest_path);
 	else if (file_type == utils::file_type::hxv)
-		hxv::decompress<SizeT>(read_pos, source.size() - 1, dest_path);
+		hxv::data::decompress(utils::fl2::decompressor(), read_pos, source.size() - 1).write(dest_path);
 	else
 	[[unlikely]]
 		throw std::runtime_error("unexpected file type");

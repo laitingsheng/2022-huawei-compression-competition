@@ -5,238 +5,210 @@
 #include <cstdint>
 
 #include <array>
-#include <concepts>
+#include <filesystem>
 #include <stdexcept>
-#include <string>
-#include <tuple>
 #include <utility>
-#include <vector>
 
 #include <fmt/compile.h>
 #include <fmt/core.h>
-#include <fmt/ranges.h>
 #include <mio/mmap.hpp>
 
-#include "../utils/counter.hpp"
-#include "../utils/fl2.hpp"
-#include "../utils/utils.hpp"
+#include "../std.hpp"
+#include "../utils/seq.hpp"
+#include "../utils/traits.hpp"
 
 namespace core::hxv
 {
 
-[[nodiscard]]
-[[using gnu : always_inline, hot, const]]
-inline static uint8_t from_hex_char(char hex)
+class data final
 {
-	if (hex >= '0' && hex <= '9')
-		return hex - '0';
-	else if (hex >= 'A' && hex <= 'F')
-		return hex - 'A' + 10;
-	else
-	[[unlikely]]
-		throw std::invalid_argument(fmt::format(FMT_STRING("invalid hex character ASCII {:#02x}"), hex));
-}
-
-[[nodiscard]]
-[[using gnu : always_inline, hot, pure]]
-inline static uint8_t from_hex_chars(const char * input)
-{
-	return from_hex_char(input[0]) << 4 | from_hex_char(input[1]);
-}
-
-template<char sep>
-[[nodiscard]]
-[[using gnu : always_inline, hot, pure]]
-inline static std::tuple<uint8_t, uint8_t, size_t> parse_cell(const char * pos)
-{
-	uint8_t first = from_hex_chars(pos);
-	pos += 2;
-
-	uint8_t second = from_hex_chars(pos);
-	pos += 2;
-
-	if (char c = *pos; c != sep)
-	[[unlikely]]
-		throw std::runtime_error(fmt::format(FMT_STRING("expect {:#02x}, got {:#02x}"), sep, c));
-
-	return { first, second, 5 };
-}
-
-template<std::unsigned_integral SizeT>
-[[nodiscard]]
-[[using gnu : always_inline]]
-inline static size_t compress(const char * read_pos, size_t read_size, char * write_pos, size_t write_capacity)
-{
-	if (write_capacity < 1 + sizeof(SizeT))
-	[[unlikely]]
-		throw std::runtime_error("destination is too small");
-
-	utils::counter::differential::differential<uint8_t, SizeT> counter_column1;
-	std::array<std::vector<uint8_t>, 9> standard_columns;
-
-	SizeT line_count = 0;
-	size_t read = 0;
-	while (read < read_size)
-	[[likely]]
+	[[nodiscard]]
+	inline static constexpr uint8_t from_hex_char(char hex)
 	{
+		if (hex >= '0' && hex <= '9')
+			return hex - '0';
+		else if (hex >= 'A' && hex <= 'F')
+			return hex - 'A' + 10;
+		else
+		[[unlikely]]
+			throw std::invalid_argument(fmt::format(FMT_STRING("invalid hex character ASCII {:#02x}"), hex));
+	}
+
+	[[nodiscard]]
+	inline static uint8_t from_hex_chars(const char * pos)
+	{
+		return from_hex_char(pos[0]) << 4 | from_hex_char(pos[1]);
+	}
+
+	[[nodiscard]]
+	inline static constexpr char to_hex_char(uint8_t value)
+	{
+		if (value < 16)
+			return value < 10 ? '0' + value : 'A' + value - 10;
+		else
+		[[unlikely]]
+			throw std::invalid_argument(fmt::format(FMT_STRING("value should not exceed 0xf, got 0x{:x}"), value));
+	}
+
+	inline static void to_hex_chars(uint8_t value, char * output)
+	{
+		output[0] = to_hex_char(value >> 4);
+		output[1] = to_hex_char(value & 0xF);
+	}
+
+	std::array<std::vector<uint8_t>, 10> columns;
+	size_t line_count;
+
+	explicit data() : columns(), line_count(0) {}
+
+	template<char sep, size_t index>
+	[[nodiscard]]
+	inline const char * parse_cell(const char * pos, size_t & size)
+	{
+		if (size < 5)
+			throw std::runtime_error("insufficient data for parsing");
+
+		columns[2 * index].push_back(from_hex_chars(pos));
+		pos += 2;
+
+		columns[2 * index + 1].push_back(from_hex_chars(pos));
+		pos += 2;
+
+		if (char c = *pos++; c != sep)
+		[[unlikely]]
+			throw std::runtime_error(fmt::format(FMT_STRING("expect {:#02x}, got {:#02x}"), sep, c));
+
+		size -= 5;
+		return pos;
+	}
+
+	template<size_t ... indices>
+	[[nodiscard]]
+	inline const char * parse_consecutive(std::index_sequence<indices ...>, const char * pos, size_t & size)
+	{
+		return ((pos = parse_cell<',', indices>(pos, size)), ...);
+	}
+
+	template<char sep, size_t index>
+	[[nodiscard]]
+	inline char * write_cell(size_t line, char * pos, size_t & capacity) const
+	{
+		if (capacity < 5)
+			throw std::runtime_error("insufficient capacity for output");
+
+		to_hex_chars(columns[2 * index][line], pos);
+		pos += 2;
+
+		to_hex_chars(columns[2 * index + 1][line], pos);
+		pos += 2;
+
+		*pos++ = sep;
+
+		capacity -= 5;
+		return pos;
+	}
+
+	template<size_t ... indices>
+	[[nodiscard]]
+	inline char * write_consecutive(std::index_sequence<indices ...>, size_t line, char * pos, size_t & capacity) const
+	{
+		return ((pos = write_cell<',', indices>(line, pos, capacity)), ...);
+	}
+public:
+	[[nodiscard]]
+	inline static data decompress(utils::decompressor auto && decompressor, const char * pos, size_t size)
+	{
+		data re;
+
+		const auto line_count = re.line_count = *reinterpret_cast<const size_t *>(pos);
+		pos += sizeof(size_t);
+		size -= sizeof(size_t);
+		for (auto & column : re.columns)
 		{
-			auto [first, second, offset] = parse_cell<','>(read_pos);
-			standard_columns[0].push_back(first);
-			counter_column1.add(second);
-			read_pos += offset;
-			read += offset;
+			std::vector<uint8_t> buffer(line_count);
+			auto read = decompressor(pos, size, buffer);
+			pos += read;
+			size -= read;
+			column = utils::seq::diff::reconstruct(buffer);
 		}
 
-		for (size_t i = 1; i < 7; i += 2)
-		[[likely]]
+		if (size > 0)
+			throw std::runtime_error("redundant data found in the compressed file");
+
+		return re;
+	}
+
+	[[nodiscard]]
+	inline static data parse(const char * pos, size_t size)
+	{
+		data re;
+
+		size_t line_count = 0;
+		while (size > 0)
 		{
-			auto [first, second, offset] = parse_cell<','>(read_pos);
-			standard_columns[i].push_back(first);
-			standard_columns[i + 1].push_back(second);
-			read_pos += offset;
-			read += offset;
+			pos = re.parse_consecutive(std::make_index_sequence<4>(), pos, size);
+			pos = re.parse_cell<'\n', 4>(pos, size);
+
+			++line_count;
 		}
 
+		re.line_count = line_count;
+		for (auto & column : re.columns)
+			column.shrink_to_fit();
+
+		return re;
+	}
+
+	~data() noexcept = default;
+
+	data(const data &) = default;
+	data(data &&) noexcept = default;
+
+	data & operator=(const data &) = default;
+	data & operator=(data &&) noexcept = default;
+
+	inline void compress(utils::compressor auto && compressor, std::path_like auto && path) const
+	{
+		static constexpr size_t leading_size = 1 + sizeof(size_t);
+
+		size_t capacity = leading_size + 10 * (line_count * sizeof(uint8_t) + sizeof(size_t));
+		utils::blank_file(path, capacity);
+		auto file = mio::mmap_sink(path);
+		auto pos = file.data();
+
+		*pos++ = static_cast<uint8_t>(utils::file_type::hxv);
+		*reinterpret_cast<size_t *>(pos) = line_count;
+		pos += sizeof(size_t);
+		capacity -= leading_size;
+		size_t total = leading_size;
+		for (const auto & column : columns)
 		{
-			auto [first, second, offset] = parse_cell<'\n'>(read_pos);
-			standard_columns[7].push_back(first);
-			standard_columns[8].push_back(second);
-			read_pos += offset;
-			read += offset;
+			auto written = compressor(pos, capacity, utils::seq::diff::construct(column));
+			total += written;
+			pos += written;
+			capacity -= written;
 		}
 
-		++line_count;
+		std::filesystem::resize_file(path, total);
 	}
-	counter_column1.commit();
 
-	if (read != read_size)
-	[[unlikely]]
-		throw std::runtime_error("unexpected end of file");
-
-	*write_pos++ = static_cast<uint8_t>(utils::file_type::hxv);
-	*reinterpret_cast<SizeT *>(write_pos) = line_count;
-	write_pos += sizeof(SizeT);
-	SizeT size = 1 + sizeof(SizeT);
-	write_capacity -= 1 + sizeof(SizeT);
-
-	auto written = utils::counter::write(write_pos, write_capacity, counter_column1.data());
-	write_pos += written;
-	size += written;
-	write_capacity -= written;
-
-	utils::fl2::compressor compressor;
-
-	for (const auto & column : standard_columns)
+	inline void write(std::path_like auto && path) const
 	{
-		auto written = compressor.process<uint8_t, SizeT>(write_pos, write_capacity, column);
-		write_pos += written;
-		size += written;
-		write_capacity -= written;
+		size_t capacity = line_count * 25;
+		utils::blank_file(path, capacity);
+		auto file = mio::mmap_sink(path);
+		auto pos = file.data();
+
+		for (size_t line = 0; line < line_count; ++line)
+		{
+			pos = write_consecutive(std::make_index_sequence<4>(), line, pos, capacity);
+			pos = write_cell<'\n', 4>(line, pos, capacity);
+		}
+
+		if (capacity > 0)
+			throw std::runtime_error("unexpected uncompressed size");
 	}
-
-	return size;
-}
-
-[[nodiscard]]
-[[using gnu : always_inline, hot, const]]
-inline static char to_hex_char(uint8_t value)
-{
-	if (value >= 16)
-	[[unlikely]]
-		throw std::invalid_argument(fmt::format(FMT_STRING("value should not exceed 0xf, got 0x{:x}"), value));
-	else
-	[[likely]]
-		return value < 10 ? '0' + value : 'A' + value - 10;
-}
-
-[[using gnu : always_inline, hot]]
-inline static void to_hex_chars(uint8_t value, char * output)
-{
-	output[0] = to_hex_char(value >> 4);
-	output[1] = to_hex_char(value & 0xF);
-}
-
-[[using gnu : always_inline, hot]]
-inline static void write_vector(const std::vector<uint8_t> & data, char * write_pos)
-{
-	for (size_t i = 0; i < data.size(); ++i)
-	[[likely]]
-	{
-		to_hex_chars(data[i], write_pos);
-		write_pos += 25;
-	}
-}
-
-template<char sep>
-[[using gnu : always_inline, hot]]
-inline static void write_separator(size_t count, char * write_pos)
-{
-	for (size_t i = 0; i < count; ++i)
-	[[likely]]
-	{
-		*write_pos = sep;
-		write_pos += 25;
-	}
-}
-
-template<std::unsigned_integral SizeT>
-[[using gnu : always_inline]]
-inline static void decompress(const char * read_pos, size_t read_size, const std::string & dest_path)
-{
-	const auto line_count = *reinterpret_cast<const SizeT *>(read_pos);
-	read_pos += sizeof(SizeT);
-	read_size -= sizeof(SizeT);
-
-	utils::blank_file(dest_path, line_count * 25);
-	auto dest = mio::mmap_sink(dest_path);
-
-	std::vector<uint8_t> buffer(line_count);
-
-	auto read = utils::counter::differential::reconstruct<uint8_t, SizeT>(read_pos, read_size, buffer);
-	read_pos += read;
-	read_size -= read;
-	hxv::write_vector(buffer, dest.data() + 2);
-
-	utils::fl2::decompressor decompressor;
-
-	read = decompressor.process<uint8_t, SizeT>(read_pos, read_size, buffer);
-	read_pos += read;
-	read_size -= read;
-	hxv::write_vector(buffer, dest.data());
-
-	write_separator<','>(line_count, dest.data() + 4);
-
-	for (size_t offset = 5; offset < 20; offset += 5)
-	[[likely]]
-	{
-		read = decompressor.process<uint8_t, SizeT>(read_pos, read_size, buffer);
-		read_pos += read;
-		read_size -= read;
-		write_vector(buffer, dest.data() + offset);
-
-		read = decompressor.process<uint8_t, SizeT>(read_pos, read_size, buffer);
-		read_pos += read;
-		read_size -= read;
-		write_vector(buffer, dest.data() + offset + 2);
-
-		write_separator<','>(line_count, dest.data() + offset + 4);
-	}
-
-	read = decompressor.process<uint8_t, SizeT>(read_pos, read_size, buffer);
-	read_pos += read;
-	read_size -= read;
-	write_vector(buffer, dest.data() + 20);
-
-	read = decompressor.process<uint8_t, SizeT>(read_pos, read_size, buffer);
-	read_pos += read;
-	read_size -= read;
-	write_vector(buffer, dest.data() + 22);
-
-	write_separator<'\n'>(line_count, dest.data() + 24);
-
-	if (read_size > 0)
-		throw std::runtime_error("unexpected data at end of file");
-}
+};
 
 }
 

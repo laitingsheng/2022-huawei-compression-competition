@@ -6,268 +6,267 @@
 #include <cstdint>
 
 #include <array>
-#include <concepts>
+#include <filesystem>
 #include <limits>
 #include <stdexcept>
-#include <string>
-#include <tuple>
 #include <utility>
-#include <vector>
 
-#include <fmt/compile.h>
-#include <fmt/core.h>
-#include <fmt/ranges.h>
 #include <mio/mmap.hpp>
 
-#include "../utils/counter.hpp"
-#include "../utils/fl2.hpp"
-#include "../utils/utils.hpp"
+#include "../std.hpp"
+#include "../utils/seq.hpp"
+#include "../utils/traits.hpp"
 
 namespace core::dat
 {
 
-template<std::signed_integral T, size_t mantissa_width>
-[[nodiscard]]
-[[using gnu : always_inline, hot, pure]]
-inline static std::pair<T, size_t> float_to_integer(const char * pos)
+class data final
 {
-	constexpr size_t max_digits = std::numeric_limits<T>::digits10;
-	static_assert(max_digits > mantissa_width, "T cannot hold the floating point number");
+	std::array<std::vector<uint8_t>, 71> signs;
+	std::array<std::vector<uint64_t>, 71> columns;
+	size_t line_count, file_size;
 
-	constexpr size_t max_integer_width = max_digits - mantissa_width;
+	explicit data() : columns(), line_count(0), file_size(0) {}
 
-	bool sign;
-	size_t integer_width;
-	T output;
-	char c = *pos++;
-	if (c == '-')
+	template<char sep, size_t mantissa_width, size_t index>
+	[[nodiscard]]
+	inline const char * parse_cell(const char * pos, size_t & size)
 	{
-		sign = true;
-		integer_width = 0;
-		output = 0;
-	}
-	else if (isdigit(c))
-	{
-		sign = false;
-		integer_width = 1;
-		output = c - '0';
-	}
-	else
-	[[unlikely]]
-		throw std::runtime_error("invalid leading character of the floating point number");
+		constexpr size_t max_integer_width = std::numeric_limits<uint64_t>::digits10 - mantissa_width;
 
-	for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
-	[[likely]]
-		output = output * 10 + (c - '0');
-
-	if (c != '.')
-	[[unlikely]]
-		throw std::runtime_error("unprocessable integer part of the floating point");
-
-	size_t parsed_mantissa_width = 0;
-	for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
-	[[likely]]
-		output = output * 10 + (c - '0');
-
-	if (sign)
-		output |= std::numeric_limits<T>::min();
-
-	return { output, integer_width + mantissa_width + sign + 1 };
-}
-
-template<std::signed_integral T, size_t mantissa_width, char sep>
-[[nodiscard]]
-[[using gnu : always_inline, hot, pure]]
-inline static std::tuple<T, size_t> parse_cell(const char * pos)
-{
-	auto [output, offset] = float_to_integer<T, mantissa_width>(pos);
-	pos += offset;
-
-	if (char c = *pos; c != sep)
-	[[unlikely]]
-		throw std::runtime_error(fmt::format(FMT_STRING("expect {:#02x}, got {:#02x}"), sep, c));
-
-	return { output, offset + 1 };
-}
-
-template<std::unsigned_integral SizeT>
-[[nodiscard]]
-[[using gnu : always_inline, pure]]
-inline static SizeT compress(const char * read_pos, size_t read_size, char * write_pos, size_t write_capacity)
-{
-	if (write_capacity < 1 + sizeof(SizeT))
-	[[unlikely]]
-		throw std::runtime_error("destination is too small");
-
-	utils::counter::differential::differential<int64_t, SizeT> counter_column0;
-	std::array<std::vector<int64_t>, 70> standard_columns;
-
-	SizeT line_count = 0;
-	size_t read = 0;
-	while (read < read_size)
-	[[likely]]
-	{
+		bool sign;
+		size_t integer_width;
+		uint64_t number;
+		char c = *pos++;
+		if (c == '-')
 		{
-			auto [output, offset] = parse_cell<int64_t, 3, ' '>(read_pos);
-			counter_column0.add(output);
-			read_pos += offset;
-			read += offset;
+			sign = true;
+			integer_width = 0;
+			number = 0;
 		}
-
-		for (size_t i = 0; i < 69; ++i)
-		[[likely]]
+		else if (isdigit(c))
 		{
-			auto [output, offset] = parse_cell<int64_t, 5, ' '>(read_pos);
-			standard_columns[i].push_back(output);
-			read_pos += offset;
-			read += offset;
+			sign = false;
+			integer_width = 1;
+			number = c - '0';
 		}
-
-		{
-			auto [output, offset] = parse_cell<int64_t, 5, '\r'>(read_pos);
-			standard_columns[69].push_back(output);
-			read_pos += offset;
-			read += offset;
-		}
-
-		if (char c = *read_pos++; c != '\n')
+		else
 		[[unlikely]]
-			throw std::runtime_error(fmt::format(FMT_STRING("expect 0x0a, got {:#02x}"), c));
-		++read;
+			throw std::runtime_error("invalid leading character of the floating point number");
 
-		++line_count;
-	}
-	counter_column0.commit();
+		signs[index].push_back(sign);
 
-	if (read != read_size)
-	[[unlikely]]
-		throw std::runtime_error("unexpected end of file");
+		for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
+			number = number * 10 + (c - '0');
 
-	*write_pos++ = static_cast<uint8_t>(utils::file_type::dat);
-	auto numbers = reinterpret_cast<SizeT *>(write_pos);
-	numbers[0] = read_size;
-	numbers[1] = line_count;
-	write_pos += 2 * sizeof(SizeT);
-	SizeT size = 1 + 2 * sizeof(SizeT);
-	write_capacity -= 1 + 2 * sizeof(SizeT);
+		if (isdigit(c))
+		[[unlikely]]
+			throw std::runtime_error("insufficient length for the floating point integer part");
 
-	auto written = utils::counter::write(write_pos, write_capacity, counter_column0.data());
-	write_pos += written;
-	size += written;
-	write_capacity -= written;
+		if (c != '.')
+		[[unlikely]]
+			throw std::runtime_error("unprocessable integer part of the floating point");
 
-	utils::fl2::compressor compressor;
+		size_t parsed_mantissa_width = 0;
+		for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
+			number = number * 10 + (c - '0');
 
-	for (const auto & column : standard_columns)
-	{
-		auto written = compressor.process<int64_t, SizeT>(write_pos, write_capacity, column);
-		write_pos += written;
-		size += written;
-		write_capacity -= written;
-	}
+		if (parsed_mantissa_width < mantissa_width)
+		[[unlikely]]
+			throw std::runtime_error("insufficient mantissa parsed from the input");
 
-	return size;
-}
+		if (isdigit(c))
+		[[unlikely]]
+			throw std::runtime_error("insufficient length for the floating point mantissa part");
 
-template<std::signed_integral T, size_t mantissa_width>
-[[nodiscard]]
-[[using gnu : always_inline, hot]]
-inline size_t write_integer_as_float(T number, char * write_pos)
-{
-	constexpr T sign_mask = std::numeric_limits<T>::min();
+		if (c != sep)
+		[[unlikely]]
+			throw std::runtime_error("invalid trailing character after the floating point number");
 
-	bool sign = number & sign_mask;
-	if (sign)
-	{
-		*write_pos++ = '-';
-		number &= ~sign_mask;
+		columns[index].push_back(number);
+		size -= sign + integer_width + 1 + mantissa_width + 1;
+		return pos;
 	}
 
-	constexpr size_t max_length = std::numeric_limits<T>::digits10 + 1;
-
-	std::array<char, max_length> buffer;
-
-	size_t index = max_length;
-	for (size_t i = 0; i < mantissa_width; ++i)
-	[[likely]]
+	template<size_t ... indices>
+	[[nodiscard]]
+	inline const char * parse_consecutive(std::index_sequence<indices ...>, const char * pos, size_t & size)
 	{
-		buffer[--index] = '0' + number % 10;
-		number /= 10;
+		return ((pos = parse_cell<' ', 5, indices + 1>(pos, size)), ...);
 	}
 
-	buffer[--index] = '.';
-
-	if (number > 0)
+	template<char sep, size_t mantissa_width, size_t index>
+	[[nodiscard]]
+	inline char * write_cell(size_t line, char * pos, size_t & capacity) const
 	{
-		while (number > 0)
+		auto number = columns[index][line];
+		std::vector<char> buffer;
+		buffer.reserve(std::numeric_limits<uint64_t>::digits10 + 3);
+		buffer.push_back(sep);
+		for (size_t i = 0; i < mantissa_width; ++i)
 		{
-			buffer[--index] = '0' + number % 10;
+			buffer.push_back('0' + number % 10);
 			number /= 10;
 		}
-	}
-	else
-		buffer[--index] = '0';
-
-	std::copy(buffer.begin() + index, buffer.end(), write_pos);
-
-	return max_length - index + sign;
-}
-
-template<std::unsigned_integral SizeT>
-[[using gnu : always_inline]]
-inline static void decompress(const char * read_pos, size_t read_size, const std::string & dest_path)
-{
-	auto numbers = reinterpret_cast<const SizeT *>(read_pos);
-	const auto original_size = numbers[0], line_count = numbers[1];
-	read_pos += 2 * sizeof(SizeT);
-	read_size -= 2 * sizeof(SizeT);
-
-	std::array<std::vector<int64_t>, 71> columns;
-	for (auto & column : columns)
-		column.resize(line_count);
-
-	auto read = utils::counter::differential::reconstruct<int64_t, SizeT>(read_pos, read_size, columns[0]);
-	read_pos += read;
-	read_size -= read;
-
-	utils::fl2::decompressor decompressor;
-
-	for (size_t i = 1; i < 71; ++i)
-	{
-		read = decompressor.process<int64_t, SizeT>(read_pos, read_size, columns[i]);
-		read_pos += read;
-		read_size -= read;
-	}
-
-	if (read_size > 0)
-		throw std::runtime_error("unexpected data at end of file");
-
-	utils::blank_file(dest_path, original_size);
-	auto dest = mio::mmap_sink(dest_path);
-
-	auto write_pos = dest.data();
-	for (size_t i = 0; i < line_count; ++i)
-	[[likely]]
-	{
-		auto written = write_integer_as_float<int64_t, 3>(columns[0][i], write_pos);
-		write_pos += written;
-		*write_pos++ = ' ';
-
-		for (size_t j = 1; j < 70; ++j)
-		[[likely]]
+		buffer.push_back('.');
+		if (number > 0)
 		{
-			written = dat::write_integer_as_float<int64_t, 5>(columns[j][i], write_pos);
-			write_pos += written;
-			*write_pos++ = ' ';
+			while (number > 0)
+			{
+				buffer.push_back('0' + number % 10);
+				number /= 10;
+			}
+		}
+		else
+			buffer.push_back('0');
+
+		if (signs[index][line])
+			buffer.push_back('-');
+
+		if (buffer.size() > capacity)
+		[[unlikely]]
+			throw std::runtime_error("insufficient capacity for the floating point number");
+
+		std::copy(buffer.rbegin(), buffer.rend(), pos);
+
+		capacity -= buffer.size();
+		return pos + buffer.size();
+	}
+
+	template<size_t ... indices>
+	[[nodiscard]]
+	inline char * write_consecutive(std::index_sequence<indices ...>, size_t line, char * pos, size_t & capacity) const
+	{
+		return ((pos = write_cell<' ', 5, indices + 1>(line, pos, capacity)), ...);
+	}
+public:
+	[[nodiscard]]
+	inline static data decompress(utils::decompressor auto && decompressor, const char * pos, size_t size)
+	{
+		data re;
+
+		auto constants = reinterpret_cast<const size_t *>(pos);
+		auto line_count = re.line_count = constants[0];
+		re.file_size = constants[1];
+		pos += 2 * sizeof(size_t);
+		size -= 2 * sizeof(size_t);
+		for (auto & sign : re.signs)
+		{
+			sign.resize(line_count);
+			auto read = decompressor(pos, size, sign);
+			pos += read;
+			size -= read;
+		}
+		for (auto & column : re.columns)
+		{
+			std::vector<uint64_t> buffer(line_count);
+			auto read = decompressor(pos, size, buffer);
+			pos += read;
+			size -= read;
+			column = utils::seq::diff::reconstruct(buffer);
 		}
 
-		written = dat::write_integer_as_float<int64_t, 5>(columns[70][i], write_pos);
-		write_pos += written;
-		*write_pos++ = '\r';
-
-		*write_pos++ = '\n';
+		return re;
 	}
-}
+
+	[[nodiscard]]
+	inline static data parse(const char * pos, size_t size)
+	{
+		data re;
+
+		re.file_size = size;
+		size_t line_count = 0;
+		while (size > 0)
+		{
+			pos = re.parse_cell<' ', 3, 0>(pos, size);
+			pos = re.parse_consecutive(std::make_index_sequence<69>(), pos, size);
+			pos = re.parse_cell<'\r', 5, 70>(pos, size);
+
+			if (*pos++ != '\n')
+			[[unlikely]]
+				throw std::runtime_error("invalid line separator");
+			--size;
+
+			++line_count;
+		}
+
+		re.line_count = line_count;
+		for (auto & sign : re.signs)
+			sign.shrink_to_fit();
+		for (auto & column : re.columns)
+			column.shrink_to_fit();
+
+		return re;
+	}
+
+	~data() noexcept = default;
+
+	data(const data &) = default;
+	data(data &&) noexcept = default;
+
+	data & operator=(const data &) = default;
+	data & operator=(data &&) noexcept = default;
+
+	inline void compress(utils::compressor auto && compressor, std::path_like auto && path) const
+	{
+		static constexpr size_t leading_size = 1 + 2 * sizeof(size_t);
+
+		size_t capacity = leading_size + 71 * (
+			sizeof(size_t) +
+			line_count * sizeof(uint64_t) +
+			sizeof(size_t) +
+			line_count * sizeof(uint8_t)
+		);
+		utils::blank_file(path, capacity);
+		auto file = mio::mmap_sink(path);
+		auto pos = file.data();
+
+		*pos++ = static_cast<uint8_t>(utils::file_type::dat);
+		auto constants = reinterpret_cast<size_t *>(pos);
+		constants[0] = line_count;
+		constants[1] = file_size;
+		pos += 2 * sizeof(size_t);
+		capacity -= leading_size;
+		size_t total = leading_size;
+		for (const auto & sign : signs)
+		{
+			auto written = compressor(pos, capacity, sign);
+			total += written;
+			pos += written;
+			capacity -= written;
+		}
+		for (const auto & column : columns)
+		{
+			auto written = compressor(pos, capacity, utils::seq::diff::construct(column));
+			total += written;
+			pos += written;
+			capacity -= written;
+		}
+
+		std::filesystem::resize_file(path, total);
+	}
+
+	inline void write(std::path_like auto && path) const
+	{
+		utils::blank_file(path, file_size);
+		auto file = mio::mmap_sink(path);
+		auto pos = file.data();
+
+		auto capacity = file_size;
+		for (size_t line = 0; line < line_count; ++line)
+		{
+			pos = write_cell<' ', 3, 0>(line, pos, capacity);
+			pos = write_consecutive(std::make_index_sequence<69>(), line, pos, capacity);
+			pos = write_cell<'\r', 5, 70>(line, pos, capacity);
+
+			*pos++ = '\n';
+			--capacity;
+		}
+
+		if (capacity > 0)
+			throw std::runtime_error("unexpected uncompressed size");
+	}
+};
 
 }
 
