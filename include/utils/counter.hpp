@@ -3,136 +3,102 @@
 
 #include <cstddef>
 
+#include <algorithm>
 #include <concepts>
 #include <stdexcept>
 #include <utility>
 #include <vector>
 
-#include <fmt/core.h>
-#include <fmt/compile.h>
-
-#include "./traits.hpp"
-
-namespace utils
+namespace utils::counter
 {
 
-namespace counter
+template<std::integral T>
+[[nodiscard]]
+inline static size_t write(char * pos, size_t & capacity, const std::vector<T> & data)
 {
+	constexpr size_t cell_size = sizeof(T) + sizeof(size_t);
 
-namespace differential
-{
-
-template<std::integral T, std::unsigned_integral SizeT>
-class differential final
-{
-	T value, diff;
-	SizeT count;
-	std::vector<std::pair<T, SizeT>> counter;
-public:
-	differential() : value(0), diff(0), count(0), counter() {}
-
-	differential(const differential &) = default;
-	differential(differential &&) = default;
-
-	void add(T new_value)
+	T value = 0;
+	size_t count = 0, total = 0;
+	for (T e : data)
 	{
-		if (T current_diff = new_value - value; current_diff == diff)
+		if (e == value)
 			++count;
 		else
 		{
 			if (count)
-			[[likely]]
-				counter.emplace_back(diff, count);
-			diff = current_diff;
+			{
+				if (capacity < cell_size)
+				[[unlikely]]
+					throw std::runtime_error("insufficient capacity to write the counter");
+				capacity -= cell_size;
+				total += cell_size;
+
+				*reinterpret_cast<T *>(pos) = value;
+				pos += sizeof(T);;
+				*reinterpret_cast<size_t *>(pos) = count;
+				pos += sizeof(size_t);
+			}
+			value = e;
 			count = 1;
 		}
-		value = new_value;
 	}
-
-	void commit()
-	{
-		if (count)
-		[[likely]]
-			counter.emplace_back(diff, count);
-	}
-
-	[[nodiscard]]
-	[[using gnu : pure]]
-	const auto & data() const
-	{
-		return counter;
-	}
-
-	[[nodiscard]]
-	[[using gnu : pure]]
-	auto size() const
-	{
-		return counter.size();
-	}
-};
-
-template<std::integral T, std::unsigned_integral SizeT>
-[[nodiscard]]
-[[using gnu : always_inline]]
-inline static size_t reconstruct(const char * read_pos, size_t read_size, std::vector<T> & vector)
-{
-	if (read_size < 4)
-	[[unlikely]]
-		throw std::runtime_error("source is too small");
-
-	auto size = *reinterpret_cast<const SizeT *>(read_pos);
-	read_pos += sizeof(SizeT);
-	size_t read = sizeof(SizeT) + size * (sizeof(T) + sizeof(SizeT));
-	if (read > read_size)
-	[[unlikely]]
-		throw std::runtime_error(fmt::format(FMT_STRING("need {} bytes to read, {} bytes left"), read, read_size));
-
-	T value = 0;
-	for (SizeT i = 0, index = 0; i < size; ++i)
+	if (count)
 	[[likely]]
 	{
-		auto diff = *reinterpret_cast<const T *>(read_pos);
-		read_pos += sizeof(T);
-		auto count = *reinterpret_cast<const SizeT *>(read_pos);
-		read_pos += sizeof(SizeT);
+		if (capacity < cell_size)
+		[[unlikely]]
+			throw std::runtime_error("insufficient capacity to write the counter");
+		capacity -= cell_size;
+		total += cell_size;
 
-		for (SizeT j = 0; j < count; ++j)
-		[[likely]]
-		{
-			value += diff;
-			vector[index++] = value;
-		}
-	}
-
-	return read;
-}
-
-}
-
-template<std::integral T, std::unsigned_integral SizeT>
-[[nodiscard]]
-[[using gnu : always_inline]]
-inline static SizeT write(char * pos, size_t capacity, const std::vector<std::pair<T, SizeT>> & counter)
-{
-	size_t written = sizeof(SizeT) + counter.size() * (sizeof(T) + sizeof(SizeT));
-	if (written > capacity)
-	[[unlikely]]
-		throw std::runtime_error("not enough space to serialise the counter");
-
-	*reinterpret_cast<SizeT *>(pos) = counter.size();
-	pos += sizeof(SizeT);
-
-	for (const auto & [value, count] : counter)
-	{
 		*reinterpret_cast<T *>(pos) = value;
-		pos += sizeof(T);
-		*reinterpret_cast<SizeT *>(pos) = count;
-		pos += sizeof(SizeT);
+		pos += sizeof(T);;
+		*reinterpret_cast<size_t *>(pos) = count;
+		pos += sizeof(size_t);
 	}
 
-	return written;
+	return total;
 }
 
+template<std::integral T>
+[[nodiscard]]
+inline static size_t read(const char * pos, size_t & size, std::vector<T> & data)
+{
+	constexpr size_t cell_size = sizeof(T) + sizeof(size_t);
+
+	T value = 0;
+	size_t count = 0, total = 0;
+
+	for (T & e : data)
+	{
+		if (!count)
+		{
+			if (size < cell_size)
+			[[unlikely]]
+				throw std::runtime_error("insufficient size to read the counter");
+			size -= cell_size;
+			total += cell_size;
+
+			value = *reinterpret_cast<const T *>(pos);
+			pos += sizeof(T);
+			count = *reinterpret_cast<const size_t *>(pos);
+			pos += sizeof(size_t);
+
+			if (!count)
+			[[unlikely]]
+				throw std::runtime_error("invalid counter");
+		}
+
+		e = value;
+		--count;
+	}
+
+	if (count)
+	[[unlikely]]
+		throw std::runtime_error("corrupted counter");
+
+	return total;
 }
 
 }

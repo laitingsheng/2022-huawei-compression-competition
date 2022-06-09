@@ -28,9 +28,9 @@ class data final
 
 	explicit data() : columns(), line_count(0), file_size(0) {}
 
-	template<char sep, size_t mantissa_width, size_t index>
+	template<char sep, size_t mantissa_width>
 	[[nodiscard]]
-	inline const char * parse_cell(const char * pos, size_t & size)
+	inline const char * parse_cell(const char * pos, size_t & size, size_t index)
 	{
 		constexpr size_t max_integer_width = std::numeric_limits<uint64_t>::digits10 - mantissa_width;
 
@@ -88,16 +88,9 @@ class data final
 		return pos;
 	}
 
-	template<size_t ... indices>
+	template<char sep, size_t mantissa_width>
 	[[nodiscard]]
-	inline const char * parse_consecutive(std::index_sequence<indices ...>, const char * pos, size_t & size)
-	{
-		return ((pos = parse_cell<' ', 5, indices + 1>(pos, size)), ...);
-	}
-
-	template<char sep, size_t mantissa_width, size_t index>
-	[[nodiscard]]
-	inline char * write_cell(size_t line, char * pos, size_t & capacity) const
+	inline char * write_cell(char * pos, size_t & capacity, size_t line, size_t index) const
 	{
 		auto number = columns[index][line];
 		std::vector<char> buffer;
@@ -132,13 +125,6 @@ class data final
 		capacity -= buffer.size();
 		return pos + buffer.size();
 	}
-
-	template<size_t ... indices>
-	[[nodiscard]]
-	inline char * write_consecutive(std::index_sequence<indices ...>, size_t line, char * pos, size_t & capacity) const
-	{
-		return ((pos = write_cell<' ', 5, indices + 1>(line, pos, capacity)), ...);
-	}
 public:
 	[[nodiscard]]
 	inline static data decompress(utils::decompressor auto && decompressor, const char * pos, size_t size)
@@ -150,21 +136,33 @@ public:
 		re.file_size = constants[1];
 		pos += 2 * sizeof(size_t);
 		size -= 2 * sizeof(size_t);
+
+		for (auto & column : re.columns)
+			column.resize(line_count);
+		for (auto & sign : re.signs)
+			sign.resize(line_count);
+
+		auto read = decompressor(pos, size, re.columns[0]);
+		pos += read;
+		size -= read;
+		utils::seq::diff::reconstruct(re.columns[0]);
+
+		for (size_t i = 1; i < 71; ++i)
+		{
+			read = decompressor(pos, size, re.columns[i]);
+			pos += read;
+			size -= read;
+		}
+
 		for (auto & sign : re.signs)
 		{
-			sign.resize(line_count);
-			auto read = decompressor(pos, size, sign);
+			read = decompressor(pos, size, sign);
 			pos += read;
 			size -= read;
 		}
-		for (auto & column : re.columns)
-		{
-			std::vector<uint64_t> buffer(line_count);
-			auto read = decompressor(pos, size, buffer);
-			pos += read;
-			size -= read;
-			column = utils::seq::diff::reconstruct(buffer);
-		}
+
+		if (size > 0)
+			throw std::runtime_error("redundant data found in the compressed file");
 
 		return re;
 	}
@@ -178,9 +176,10 @@ public:
 		size_t line_count = 0;
 		while (size > 0)
 		{
-			pos = re.parse_cell<' ', 3, 0>(pos, size);
-			pos = re.parse_consecutive(std::make_index_sequence<69>(), pos, size);
-			pos = re.parse_cell<'\r', 5, 70>(pos, size);
+			pos = re.parse_cell<' ', 3>(pos, size, 0);
+			for (size_t i = 1; i < 70; ++i)
+				pos = re.parse_cell<' ', 5>(pos, size, i);
+			pos = re.parse_cell<'\r', 5>(pos, size, 70);
 
 			if (*pos++ != '\n')
 			[[unlikely]]
@@ -228,16 +227,23 @@ public:
 		pos += 2 * sizeof(size_t);
 		capacity -= leading_size;
 		size_t total = leading_size;
-		for (const auto & sign : signs)
+
+		auto written = compressor(pos, capacity, utils::seq::diff::construct(columns[0]));
+		total += written;
+		pos += written;
+		capacity -= written;
+
+		for (size_t i = 1; i < 71; ++i)
 		{
-			auto written = compressor(pos, capacity, sign);
+			written = compressor(pos, capacity, columns[i]);
 			total += written;
 			pos += written;
 			capacity -= written;
 		}
-		for (const auto & column : columns)
+
+		for (const auto & sign : signs)
 		{
-			auto written = compressor(pos, capacity, utils::seq::diff::construct(column));
+			written = compressor(pos, capacity, sign);
 			total += written;
 			pos += written;
 			capacity -= written;
@@ -255,9 +261,10 @@ public:
 		auto capacity = file_size;
 		for (size_t line = 0; line < line_count; ++line)
 		{
-			pos = write_cell<' ', 3, 0>(line, pos, capacity);
-			pos = write_consecutive(std::make_index_sequence<69>(), line, pos, capacity);
-			pos = write_cell<'\r', 5, 70>(line, pos, capacity);
+			pos = write_cell<' ', 3>(pos, capacity, line, 0);
+			for (size_t i = 1; i < 70; ++i)
+				pos = write_cell<' ', 5>(pos, capacity, line, i);
+			pos = write_cell<'\r', 5>(pos, capacity, line, 70);
 
 			*pos++ = '\n';
 			--capacity;
