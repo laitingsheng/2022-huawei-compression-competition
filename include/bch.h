@@ -14,7 +14,7 @@
 #ifndef _BCH_H
 #define _BCH_H
 
-#include <linux/types.h>
+#include <stdint.h>
 
 /**
  * struct bch_control - BCH control structure
@@ -55,16 +55,24 @@ struct bch_control {
 	bool		swap_bits;
 };
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct bch_control *bch_init(int m, int t, unsigned int prim_poly,
 			     bool swap_bits);
 
 void bch_free(struct bch_control *bch);
 
-void bch_encode(struct bch_control *bch, const uint8_t *data,
+int bch_encode(struct bch_control *bch, const uint8_t *data,
 		unsigned int len, uint8_t *ecc);
 
 int bch_decode(struct bch_control *bch, const uint8_t *data, unsigned int len,
 	       const uint8_t *recv_ecc, const uint8_t *calc_ecc,
 	       const unsigned int *syn, unsigned int *errloc);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _BCH_H */

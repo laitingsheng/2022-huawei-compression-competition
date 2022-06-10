@@ -65,14 +65,27 @@
  * finite fields GF(2^q). In Rapport de recherche INRIA no 2829, 1996.
  */
 
-#include <linux/kernel.h>
-#include <linux/errno.h>
-#include <linux/init.h>
-#include <linux/module.h>
-#include <linux/slab.h>
-#include <linux/bitops.h>
-#include <asm/byteorder.h>
-#include <linux/bch.h>
+#include <errno.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#ifndef cpu_to_be32
+	#if BYTE_ORDER == LITTLE_ENDIAN
+		#include <arpa/inet.h>
+		#define cpu_to_be32(x) htonl(x)
+	#elif BYTE_ORDER == BIG_ENDIAN
+		#define cpu_to_be32(x) (x)
+	#endif
+#endif
+
+#include "bch.h"
+
+#define DIV_ROUND_UP(a, b) ((a + b - 1) / b)
+#define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(*(arr)))
 
 #if defined(CONFIG_BCH_CONST_PARAMS)
 #define GF_M(_p)               (CONFIG_BCH_CONST_M)
@@ -93,10 +106,6 @@
 
 #define BCH_ECC_MAX_WORDS      DIV_ROUND_UP(BCH_MAX_M * BCH_MAX_T, 32)
 
-#ifndef dbg
-#define dbg(_fmt, args...)     do {} while (0)
-#endif
-
 /*
  * represent a polynomial over GF(2^m)
  */
@@ -114,7 +123,7 @@ struct gf_poly_deg1 {
 	unsigned int   c[2];
 };
 
-static u8 swap_bits_table[] = {
+static uint8_t swap_bits_table[] = {
 	0x00, 0x80, 0x40, 0xc0, 0x20, 0xa0, 0x60, 0xe0,
 	0x10, 0x90, 0x50, 0xd0, 0x30, 0xb0, 0x70, 0xf0,
 	0x08, 0x88, 0x48, 0xc8, 0x28, 0xa8, 0x68, 0xe8,
@@ -149,7 +158,7 @@ static u8 swap_bits_table[] = {
 	0x1f, 0x9f, 0x5f, 0xdf, 0x3f, 0xbf, 0x7f, 0xff,
 };
 
-static u8 swap_bits(struct bch_control *bch, u8 in)
+static uint8_t swap_bits(struct bch_control *bch, uint8_t in)
 {
 	if (!bch->swap_bits)
 		return in;
@@ -169,7 +178,7 @@ static void bch_encode_unaligned(struct bch_control *bch,
 	const int l = BCH_ECC_WORDS(bch)-1;
 
 	while (len--) {
-		u8 tmp = swap_bits(bch, *data++);
+		uint8_t tmp = swap_bits(bch, *data++);
 
 		p = bch->mod8_tab + (l+1)*(((ecc[0] >> 24)^(tmp)) & 0xff);
 
@@ -190,15 +199,15 @@ static void load_ecc8(struct bch_control *bch, uint32_t *dst,
 	unsigned int i, nwords = BCH_ECC_WORDS(bch)-1;
 
 	for (i = 0; i < nwords; i++, src += 4)
-		dst[i] = ((u32)swap_bits(bch, src[0]) << 24) |
-			((u32)swap_bits(bch, src[1]) << 16) |
-			((u32)swap_bits(bch, src[2]) << 8) |
+		dst[i] = ((uint32_t)swap_bits(bch, src[0]) << 24) |
+			((uint32_t)swap_bits(bch, src[1]) << 16) |
+			((uint32_t)swap_bits(bch, src[2]) << 8) |
 			swap_bits(bch, src[3]);
 
 	memcpy(pad, src, BCH_ECC_BYTES(bch)-4*nwords);
-	dst[nwords] = ((u32)swap_bits(bch, pad[0]) << 24) |
-		((u32)swap_bits(bch, pad[1]) << 16) |
-		((u32)swap_bits(bch, pad[2]) << 8) |
+	dst[nwords] = ((uint32_t)swap_bits(bch, pad[0]) << 24) |
+		((uint32_t)swap_bits(bch, pad[1]) << 16) |
+		((uint32_t)swap_bits(bch, pad[2]) << 8) |
 		swap_bits(bch, pad[3]);
 }
 
@@ -238,7 +247,7 @@ static void store_ecc8(struct bch_control *bch, uint8_t *dst,
  * The exact number of computed ecc parity bits is given by member @ecc_bits of
  * @bch; it may be less than m*t for large values of t.
  */
-void bch_encode(struct bch_control *bch, const uint8_t *data,
+int bch_encode(struct bch_control *bch, const uint8_t *data,
 		unsigned int len, uint8_t *ecc)
 {
 	const unsigned int l = BCH_ECC_WORDS(bch)-1;
@@ -252,8 +261,8 @@ void bch_encode(struct bch_control *bch, const uint8_t *data,
 	const uint32_t * const tab3 = tab2 + 256*(l+1);
 	const uint32_t *pdata, *p0, *p1, *p2, *p3;
 
-	if (WARN_ON(r_bytes > sizeof(r)))
-		return;
+	if (r_bytes > sizeof(r))
+		return -EINVAL;
 
 	if (ecc) {
 		/* load ecc parity bytes into internal 32-bit buffer */
@@ -293,10 +302,10 @@ void bch_encode(struct bch_control *bch, const uint8_t *data,
 		/* input data is read in big-endian format */
 		w = cpu_to_be32(*pdata++);
 		if (bch->swap_bits)
-			w = (u32)swap_bits(bch, w) |
-			    ((u32)swap_bits(bch, w >> 8) << 8) |
-			    ((u32)swap_bits(bch, w >> 16) << 16) |
-			    ((u32)swap_bits(bch, w >> 24) << 24);
+			w = (uint32_t)swap_bits(bch, w) |
+			    ((uint32_t)swap_bits(bch, w >> 8) << 8) |
+			    ((uint32_t)swap_bits(bch, w >> 16) << 16) |
+			    ((uint32_t)swap_bits(bch, w >> 24) << 24);
 		w ^= r[0];
 		p0 = tab0 + (l+1)*((w >>  0) & 0xff);
 		p1 = tab1 + (l+1)*((w >>  8) & 0xff);
@@ -317,8 +326,9 @@ void bch_encode(struct bch_control *bch, const uint8_t *data,
 	/* store ecc parity bytes into original parity buffer */
 	if (ecc)
 		store_ecc8(bch, ecc, bch->ecc_buf);
+
+	return 0;
 }
-EXPORT_SYMBOL_GPL(bch_encode);
 
 static inline int modulo(struct bch_control *bch, unsigned int v)
 {
@@ -342,7 +352,10 @@ static inline int mod_s(struct bch_control *bch, unsigned int v)
 static inline int deg(unsigned int poly)
 {
 	/* polynomial degree is the most-significant bit index */
-	return fls(poly)-1;
+	unsigned int count = 0;
+	while (poly >>= 1)
+		count++;
+	return count;
 }
 
 static inline int parity(unsigned int x)
@@ -488,7 +501,6 @@ static int compute_error_locator_polynomial(struct bch_control *bch,
 				d ^= gf_mul(bch, elp->c[j], syn[2*i+2-j]);
 		}
 	}
-	dbg("elp=%s\n", gf_poly_str(elp));
 	return (elp->deg > t) ? -1 : (int)elp->deg;
 }
 
@@ -835,8 +847,6 @@ static struct gf_poly *gf_poly_gcd(struct bch_control *bch, struct gf_poly *a,
 {
 	struct gf_poly *tmp;
 
-	dbg("gcd(%s,%s)=", gf_poly_str(a), gf_poly_str(b));
-
 	if (a->deg < b->deg) {
 		tmp = b;
 		b = a;
@@ -849,8 +859,6 @@ static struct gf_poly *gf_poly_gcd(struct bch_control *bch, struct gf_poly *a,
 		b = a;
 		a = tmp;
 	}
-
-	dbg("%s\n", gf_poly_str(a));
 
 	return a;
 }
@@ -895,8 +903,6 @@ static void compute_trace_bk_mod(struct bch_control *bch, int k,
 	}
 	while (!out->c[out->deg] && out->deg)
 		out->deg--;
-
-	dbg("Tr(a^%d.X) mod f = %s\n", k, gf_poly_str(out));
 }
 
 /*
@@ -910,8 +916,6 @@ static void factor_polynomial(struct bch_control *bch, int k, struct gf_poly *f,
 	struct gf_poly *tk = bch->poly_2t[2];
 	struct gf_poly *z  = bch->poly_2t[3];
 	struct gf_poly *gcd;
-
-	dbg("factoring %s...\n", gf_poly_str(f));
 
 	*g = f;
 	*h = NULL;
@@ -1112,7 +1116,6 @@ int bch_decode(struct bch_control *bch, const uint8_t *data, unsigned int len,
 	}
 	return (err >= 0) ? err : -EBADMSG;
 }
-EXPORT_SYMBOL_GPL(bch_decode);
 
 /*
  * generate Galois field lookup tables
@@ -1207,7 +1210,6 @@ static int build_deg2_base(struct bch_control *bch)
 				bch->xi_tab[r] = x;
 				xi[r] = 1;
 				remaining--;
-				dbg("x%d = %x\n", r, x);
 				break;
 			}
 			y ^= ak;
@@ -1221,7 +1223,7 @@ static void *bch_alloc(size_t size, int *err)
 {
 	void *ptr;
 
-	ptr = kmalloc(size, GFP_KERNEL);
+	ptr = malloc(size);
 	if (ptr == NULL)
 		*err = 1;
 	return ptr;
@@ -1244,7 +1246,7 @@ static uint32_t *compute_generator_polynomial(struct bch_control *bch)
 	genpoly = bch_alloc(DIV_ROUND_UP(m*t+1, 32)*sizeof(*genpoly), &err);
 
 	if (err) {
-		kfree(genpoly);
+		free(genpoly);
 		genpoly = NULL;
 		goto finish;
 	}
@@ -1288,8 +1290,8 @@ static uint32_t *compute_generator_polynomial(struct bch_control *bch)
 	bch->ecc_bits = g->deg;
 
 finish:
-	kfree(g);
-	kfree(roots);
+	free(g);
+	free(roots);
 
 	return genpoly;
 }
@@ -1364,7 +1366,7 @@ struct bch_control *bch_init(int m, int t, unsigned int prim_poly,
 	if (prim_poly == 0)
 		prim_poly = prim_poly_tab[m-min_m];
 
-	bch = kzalloc(sizeof(*bch), GFP_KERNEL);
+	bch = calloc(1, sizeof(*bch));
 	if (bch == NULL)
 		goto fail;
 
@@ -1400,7 +1402,7 @@ struct bch_control *bch_init(int m, int t, unsigned int prim_poly,
 		goto fail;
 
 	build_mod8_tables(bch, genpoly);
-	kfree(genpoly);
+	free(genpoly);
 
 	err = build_deg2_base(bch);
 	if (err)
@@ -1412,7 +1414,6 @@ fail:
 	bch_free(bch);
 	return NULL;
 }
-EXPORT_SYMBOL_GPL(bch_init);
 
 /**
  *  bch_free - free the BCH control structure
@@ -1423,24 +1424,19 @@ void bch_free(struct bch_control *bch)
 	unsigned int i;
 
 	if (bch) {
-		kfree(bch->a_pow_tab);
-		kfree(bch->a_log_tab);
-		kfree(bch->mod8_tab);
-		kfree(bch->ecc_buf);
-		kfree(bch->ecc_buf2);
-		kfree(bch->xi_tab);
-		kfree(bch->syn);
-		kfree(bch->cache);
-		kfree(bch->elp);
+		free(bch->a_pow_tab);
+		free(bch->a_log_tab);
+		free(bch->mod8_tab);
+		free(bch->ecc_buf);
+		free(bch->ecc_buf2);
+		free(bch->xi_tab);
+		free(bch->syn);
+		free(bch->cache);
+		free(bch->elp);
 
 		for (i = 0; i < ARRAY_SIZE(bch->poly_2t); i++)
-			kfree(bch->poly_2t[i]);
+			free(bch->poly_2t[i]);
 
-		kfree(bch);
+		free(bch);
 	}
 }
-EXPORT_SYMBOL_GPL(bch_free);
-
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Ivan Djelic <ivan.djelic@parrot.com>");
-MODULE_DESCRIPTION("Binary BCH encoder/decoder");
