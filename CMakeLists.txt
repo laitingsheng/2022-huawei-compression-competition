@@ -6,9 +6,8 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 
 include(fmt)
 include(mio)
-include(lz4)
 include(fast-lzma2)
-include(zstd)
+include(bch)
 
 # include(doctest)
 
@@ -21,7 +20,6 @@ target_include_directories(task PRIVATE
 target_link_libraries(task PRIVATE
 	fmt::fmt
 	mio::mio
-	lz4::lz4
 	fl2::fl2
-	libzstd_static
+	bch::bch
 )
