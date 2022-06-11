@@ -22,6 +22,8 @@ namespace core::hxv
 
 class data final
 {
+	static constexpr size_t line_width = 25;
+
 	[[nodiscard]]
 	inline static constexpr uint8_t from_hex_char(char hex)
 	{
@@ -34,10 +36,100 @@ class data final
 			throw std::invalid_argument(fmt::format(FMT_STRING("invalid hex character ASCII {:#02x}"), hex));
 	}
 
+	template<std::unsigned_integral T, size_t width, bool sign, char sep, size_t index>
 	[[nodiscard]]
-	inline static uint8_t from_hex_chars(const char * pos)
+	inline static auto advance(const char * pos)
 	{
-		return from_hex_char(pos[0]) << 4 | from_hex_char(pos[1]);
+		static_assert(width > 0 && width <= sizeof(T) * 2, "invalid width for the specified type");
+		static_assert(index <= width, "index should always be less than the width");
+
+		T value = 0;
+		for (size_t i = 0; i <= width; ++i)
+		{
+			if (i == index)
+			{
+				if (pos[i] != sep)
+				[[unlikely]]
+					throw std::runtime_error("invalid HXV format (separator)");
+			}
+			else
+			{
+				value <<= 4;
+				value |= from_hex_char(pos[i]);
+			}
+		}
+
+		if constexpr(sign)
+		{
+			static constexpr T mask = 1 << ((width << 2) - 1);
+			return std::pair<bool, T>(value & mask, value & (mask - 1));
+		}
+		else
+			return value;
+	}
+
+	template<std::unsigned_integral T, size_t width, bool sign>
+	[[nodiscard]]
+	inline static auto advance(const char * pos)
+	{
+		static_assert(width > 0 && width <= sizeof(T) * 2, "invalid width");
+
+		T value = 0;
+		for (size_t i = 0; i < width; ++i)
+		{
+			value <<= 4;
+			value |= from_hex_char(pos[i]);
+		}
+
+		if constexpr(sign)
+		{
+			static constexpr T mask = 1 << ((width << 2) - 1);
+			return std::pair<bool, T>(value & mask, value & (mask - 1));
+		}
+		else
+			return value;
+	}
+
+	template<std::unsigned_integral T, size_t width, char sep, size_t index>
+	inline static void write(char * pos, T value, bool sign = false)
+	{
+		static_assert(width > 0 && width <= sizeof(T) * 2, "invalid width for the specified type");
+		static_assert(index <= width, "index should always be less than the width");
+
+		if (sign)
+		{
+			static constexpr T mask = 1 << ((width << 2) - 1);
+			value |= mask;
+		}
+
+		for (size_t i = width + 1; i > 0; --i)
+		{
+			if (i == index + 1)
+				pos[i - 1] = sep;
+			else
+			{
+				pos[i - 1] = to_hex_char(value & 0xF);
+				value >>= 4;
+			}
+		}
+	}
+
+	template<std::unsigned_integral T, size_t width>
+	inline static void write(char * pos, T value, bool sign = false)
+	{
+		static_assert(width > 0 && width <= sizeof(T) * 2, "invalid width for the specified type");
+
+		if (sign)
+		{
+			static constexpr T mask = 1 << ((width << 2) - 1);
+			value |= mask;
+		}
+
+		for (size_t i = width; i > 0; --i)
+		{
+			pos[i - 1] = to_hex_char(value & 0xF);
+			value >>= 4;
+		}
 	}
 
 	[[nodiscard]]
@@ -50,56 +142,12 @@ class data final
 			throw std::invalid_argument(fmt::format(FMT_STRING("value should not exceed 0xf, got 0x{:x}"), value));
 	}
 
-	inline static void to_hex_chars(uint8_t value, char * output)
-	{
-		output[0] = to_hex_char(value >> 4);
-		output[1] = to_hex_char(value & 0xF);
-	}
-
-	std::array<std::vector<uint8_t>, 10> columns;
+	std::vector<uint8_t> ss, nn;
+	std::array<std::vector<uint8_t>, 3> signs;
+	std::array<std::vector<uint16_t>, 5> columns;
 	size_t line_count;
 
 	explicit data() : columns(), line_count(0) {}
-
-	template<char sep>
-	[[nodiscard]]
-	inline const char * parse_cell(const char * pos, size_t & size, size_t index)
-	{
-		if (size < 5)
-			throw std::runtime_error("insufficient data for parsing");
-
-		columns[index].push_back(from_hex_chars(pos));
-		pos += 2;
-
-		columns[index + 1].push_back(from_hex_chars(pos));
-		pos += 2;
-
-		if (char c = *pos++; c != sep)
-		[[unlikely]]
-			throw std::runtime_error(fmt::format(FMT_STRING("expect {:#02x}, got {:#02x}"), sep, c));
-
-		size -= 5;
-		return pos;
-	}
-
-	template<char sep>
-	[[nodiscard]]
-	inline char * write_cell(char * pos, size_t & capacity, size_t line, size_t index) const
-	{
-		if (capacity < 5)
-			throw std::runtime_error("insufficient capacity for output");
-
-		to_hex_chars(columns[index][line], pos);
-		pos += 2;
-
-		to_hex_chars(columns[index + 1][line], pos);
-		pos += 2;
-
-		*pos++ = sep;
-
-		capacity -= 5;
-		return pos;
-	}
 public:
 	[[nodiscard]]
 	inline static data decompress(utils::decompressor auto && decompressor, const char * pos, size_t size)
@@ -110,21 +158,32 @@ public:
 		pos += sizeof(size_t);
 		size -= sizeof(size_t);
 
+		re.ss.resize(line_count);
+		re.nn.resize(line_count);
+		for (auto & sign : re.signs)
+			sign.resize(line_count);
 		for (auto & column : re.columns)
 			column.resize(line_count);
 
-		auto read = decompressor(pos, size, re.columns[0]);
+		auto read = decompressor(pos, size, re.ss);
 		pos += read;
 		size -= read;
 
-		read = decompressor(pos, size, re.columns[1]);
+		read = decompressor(pos, size, re.nn);
 		pos += read;
 		size -= read;
-		utils::seq::diff::reconstruct(re.columns[1]);
+		utils::seq::diff::reconstruct(re.nn);
 
-		for (size_t i = 2; i < 10; ++i)
+		for (auto & sign : re.signs)
 		{
-			read = decompressor(pos, size, re.columns[i]);
+			read = decompressor(pos, size, sign);
+			pos += read;
+			size -= read;
+		}
+
+		for (auto & column : re.columns)
+		{
+			read = decompressor(pos, size, column);
 			pos += read;
 			size -= read;
 		}
@@ -141,18 +200,55 @@ public:
 		data re;
 
 		size_t line_count = 0;
-		while (size > 0)
+		while (size >= line_width)
 		{
-			for (size_t i = 0; i < 8; i += 2)
-				pos = re.parse_cell<','>(pos, size, i);
-			pos = re.parse_cell<'\n'>(pos, size, 8);
+			re.ss.push_back(advance<uint8_t, 2, false>(pos));
+			pos += 2;
+			re.nn.push_back(advance<uint8_t, 2, false, ',', 2>(pos));
+			pos += 3;
 
+			re.columns[0].push_back(advance<uint16_t, 4, false, ',', 4>(pos));
+			pos += 5;
+
+			{
+				auto [sign, value] = advance<uint16_t, 3, true>(pos);
+				re.signs[0].push_back(sign);
+				re.columns[1].push_back(value);
+				pos += 3;
+			}
+
+			{
+				auto [sign, value] = advance<uint16_t, 3, true, ',', 1>(pos);
+				re.signs[1].push_back(sign);
+				re.columns[2].push_back(value);
+				pos += 4;
+			}
+
+			{
+				auto [sign, value] = advance<uint16_t, 3, true, ',', 2>(pos);
+				re.signs[2].push_back(sign);
+				re.columns[3].push_back(value);
+				pos += 4;
+			}
+
+			re.columns[4].push_back(advance<uint16_t, 3, false, '\n', 3>(pos));
+			pos += 4;
+
+			size -= line_width;
 			++line_count;
 		}
 
-		re.line_count = line_count;
+		if (size)
+		[[unlikely]]
+			throw std::runtime_error("invalid HXV format");
+
+		re.ss.shrink_to_fit();
+		re.nn.shrink_to_fit();
+		for (auto & sign : re.signs)
+			sign.shrink_to_fit();
 		for (auto & column : re.columns)
 			column.shrink_to_fit();
+		re.line_count = line_count;
 
 		return re;
 	}
@@ -180,19 +276,27 @@ public:
 		capacity -= leading_size;
 		size_t total = leading_size;
 
-		auto written = compressor(pos, capacity, columns[0]);
+		auto written = compressor(pos, capacity, ss);
 		total += written;
 		pos += written;
 		capacity -= written;
 
-		written = compressor(pos, capacity, utils::seq::diff::construct(columns[1]));
+		written = compressor(pos, capacity, utils::seq::diff::construct(nn));
 		total += written;
 		pos += written;
 		capacity -= written;
 
-		for (size_t i = 2; i < 10; ++i)
+		for (const auto & sign : signs)
 		{
-			written = compressor(pos, capacity, columns[i]);
+			written = compressor(pos, capacity, sign);
+			total += written;
+			pos += written;
+			capacity -= written;
+		}
+
+		for (const auto & column : columns)
+		{
+			written = compressor(pos, capacity, column);
 			total += written;
 			pos += written;
 			capacity -= written;
@@ -203,20 +307,33 @@ public:
 
 	inline void write(std::path_like auto && path) const
 	{
-		size_t capacity = line_count * 25;
-		utils::blank_file(path, capacity);
+		utils::blank_file(path, line_count * line_width);
 		auto file = mio::mmap_sink(path);
 		auto pos = file.data();
 
 		for (size_t line = 0; line < line_count; ++line)
 		{
-			for (size_t i = 0; i < 8; i += 2)
-				pos = write_cell<','>(pos, capacity, line, i);
-			pos = write_cell<'\n'>(pos, capacity, line, 8);
-		}
+			write<uint8_t, 2>(pos, ss[line]);
+			pos += 2;
 
-		if (capacity > 0)
-			throw std::runtime_error("unexpected uncompressed size");
+			write<uint8_t, 2, ',', 2>(pos, nn[line]);
+			pos += 3;
+
+			write<uint16_t, 4, ',', 4>(pos, columns[0][line]);
+			pos += 5;
+
+			write<uint16_t, 3>(pos, columns[1][line], signs[0][line]);
+			pos += 3;
+
+			write<uint16_t, 3, ',', 1>(pos, columns[2][line], signs[1][line]);
+			pos += 4;
+
+			write<uint16_t, 3, ',', 2>(pos, columns[3][line], signs[2][line]);
+			pos += 4;
+
+			write<uint16_t, 3, '\n', 3>(pos, columns[4][line]);
+			pos += 4;
+		}
 	}
 };
 
