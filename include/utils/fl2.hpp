@@ -49,6 +49,18 @@ public:
 			"failed to set high compression"
 		)
 		CHECK_FL2_RETURN(
+			FL2_CCtx_setParameter(_ctx, FL2_p_dictionaryLog, FL2_DICTLOG_MAX_64),
+			"failed to set dictionary log size"
+		)
+		CHECK_FL2_RETURN(
+			FL2_CCtx_setParameter(_ctx, FL2_p_literalCtxBits, FL2_LC_MAX),
+			"failed to set literal context bits"
+		)
+		CHECK_FL2_RETURN(
+			FL2_CCtx_setParameter(_ctx, FL2_p_posBits, FL2_PB_MAX),
+			"failed to set position bits"
+		)
+		CHECK_FL2_RETURN(
 			FL2_CCtx_setParameter(_ctx, FL2_p_strategy, FL2_ultra),
 			"failed to set strategy"
 		)

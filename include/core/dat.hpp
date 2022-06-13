@@ -11,6 +11,9 @@
 #include <stdexcept>
 #include <utility>
 
+#include <fmt/compile.h>
+#include <fmt/core.h>
+#include <frozen/unordered_map.h>
 #include <mio/mmap.hpp>
 
 #include "../std.hpp"
@@ -22,6 +25,22 @@ namespace core::dat
 
 class data final
 {
+	static constexpr auto hex_digits = std::array {
+		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9'
+	};
+	static constexpr frozen::unordered_map<char, uint8_t, 10> hex_digits_reverse {
+		{ '0', 0 },
+		{ '1', 1 },
+		{ '2', 2 },
+		{ '3', 3 },
+		{ '4', 4 },
+		{ '5', 5 },
+		{ '6', 6 },
+		{ '7', 7 },
+		{ '8', 8 },
+		{ '9', 9 }
+	};
+
 	std::array<std::vector<uint8_t>, 71> signs;
 	std::array<std::vector<uint64_t>, 71> columns;
 	size_t line_count, file_size;
@@ -44,20 +63,17 @@ class data final
 			integer_width = 0;
 			number = 0;
 		}
-		else if (isdigit(c))
+		else
 		{
 			sign = false;
 			integer_width = 1;
-			number = c - '0';
+			number = hex_digits_reverse.at(c);
 		}
-		else
-		[[unlikely]]
-			throw std::runtime_error("invalid leading character of the floating point number");
 
 		signs[index].push_back(sign);
 
 		for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
-			number = number * 10 + (c - '0');
+			number = number * 10 + hex_digits_reverse.at(c);
 
 		if (isdigit(c))
 		[[unlikely]]
@@ -69,7 +85,7 @@ class data final
 
 		size_t parsed_mantissa_width = 0;
 		for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
-			number = number * 10 + (c - '0');
+			number = number * 10 + hex_digits_reverse.at(c);
 
 		if (parsed_mantissa_width < mantissa_width)
 		[[unlikely]]
@@ -81,7 +97,7 @@ class data final
 
 		if (c != sep)
 		[[unlikely]]
-			throw std::runtime_error("invalid trailing character after the floating point number");
+			throw std::runtime_error(fmt::format(FMT_STRING("expect separator {:#02x}, got {:#02x}"), sep, c));
 
 		columns[index].push_back(number);
 		size -= sign + integer_width + 1 + mantissa_width + 1;
@@ -98,7 +114,7 @@ class data final
 		buffer.push_back(sep);
 		for (size_t i = 0; i < mantissa_width; ++i)
 		{
-			buffer.push_back('0' + number % 10);
+			buffer.push_back(hex_digits.at(number % 10));
 			number /= 10;
 		}
 		buffer.push_back('.');
@@ -106,7 +122,7 @@ class data final
 		{
 			while (number > 0)
 			{
-				buffer.push_back('0' + number % 10);
+				buffer.push_back(hex_digits.at(number % 10));
 				number /= 10;
 			}
 		}
