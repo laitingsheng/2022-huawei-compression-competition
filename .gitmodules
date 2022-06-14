@@ -19,3 +19,6 @@
 [submodule "external/doctest"]
 	path = external/doctest
 	url = git@github.com:doctest/doctest.git
+[submodule "external/tcmalloc"]
+	path = external/tcmalloc
+	url = git@github.com:google/tcmalloc.git
