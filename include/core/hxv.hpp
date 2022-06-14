@@ -55,7 +55,7 @@ class data final
 	inline static void to_hex_chars(uint8_t value, char * output)
 	{
 		output[0] = hex_digits.at(value >> 4);
-		output[1] = hex_digits.at(value & 0xF);
+		output[1] = hex_digits.at(value & 0xf);
 	}
 
 	std::array<std::vector<uint8_t>, 10> columns;
@@ -78,7 +78,7 @@ class data final
 
 		if (char c = *pos++; c != sep)
 		[[unlikely]]
-			throw std::runtime_error(fmt::format(FMT_STRING("expect separator {:#02x}, got {:#02x}"), sep, c));
+			throw std::runtime_error(fmt::format(FMT_COMPILE("expect separator {:#02x}, got {:#02x}"), sep, c));
 
 		size -= 5;
 		return pos;
@@ -109,30 +109,23 @@ public:
 		data re;
 
 		const auto line_count = re.line_count = *reinterpret_cast<const size_t *>(pos);
-		pos += sizeof(size_t);
-		size -= sizeof(size_t);
-
 		for (auto & column : re.columns)
 			column.resize(line_count);
 
-		auto read = decompressor(pos, size, re.columns[0]);
-		pos += read;
-		size -= read;
+		decompressor.start(reinterpret_cast<const std::byte *>(pos + sizeof(size_t)), size - sizeof(size_t));
 
-		read = decompressor(pos, size, re.columns[1]);
-		pos += read;
-		size -= read;
-		utils::seq::diff::reconstruct(re.columns[1]);
-
-		for (size_t i = 2; i < 10; ++i)
+		bool more = true;
+		for (auto & column : re.columns)
 		{
-			read = decompressor(pos, size, re.columns[i]);
-			pos += read;
-			size -= read;
+			if (!more)
+			[[unlikely]]
+				throw std::runtime_error("insufficient data for decompression");
+			more = decompressor(column);
 		}
-
-		if (size > 0)
-			throw std::runtime_error("redundant data found in the compressed file");
+		if (more)
+		[[unlikely]]
+			throw std::runtime_error("redundant data found at the end of the file");
+		utils::seq::diff::reconstruct(re.columns[1]);
 
 		return re;
 	}
@@ -176,31 +169,17 @@ public:
 		auto file = mio::mmap_sink(path);
 		auto pos = file.data();
 
-		*pos++ = static_cast<uint8_t>(utils::file_type::hxv);
-		*reinterpret_cast<size_t *>(pos) = line_count;
-		pos += sizeof(size_t);
-		capacity -= leading_size;
-		size_t total = leading_size;
+		*pos = static_cast<uint8_t>(utils::file_type::hxv);
+		*reinterpret_cast<size_t *>(pos + 1) = line_count;
 
-		auto written = compressor(pos, capacity, columns[0]);
-		total += written;
-		pos += written;
-		capacity -= written;
+		compressor.start(reinterpret_cast<std::byte *>(pos + leading_size), capacity - leading_size);
 
-		written = compressor(pos, capacity, utils::seq::diff::construct(columns[1]));
-		total += written;
-		pos += written;
-		capacity -= written;
-
+		compressor(columns[0]);
+		compressor(utils::seq::diff::construct(columns[1]));
 		for (size_t i = 2; i < 10; ++i)
-		{
-			written = compressor(pos, capacity, columns[i]);
-			total += written;
-			pos += written;
-			capacity -= written;
-		}
+			compressor(columns[i]);
 
-		std::filesystem::resize_file(path, total);
+		std::filesystem::resize_file(path, leading_size + compressor.stop());
 	}
 
 	inline void write(std::path_like auto && path) const

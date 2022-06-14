@@ -97,7 +97,7 @@ class data final
 
 		if (c != sep)
 		[[unlikely]]
-			throw std::runtime_error(fmt::format(FMT_STRING("expect separator {:#02x}, got {:#02x}"), sep, c));
+			throw std::runtime_error(fmt::format(FMT_COMPILE("expect separator {:#02x}, got {:#02x}"), sep, c));
 
 		columns[index].push_back(number);
 		size -= sign + integer_width + 1 + mantissa_width + 1;
@@ -150,35 +150,33 @@ public:
 		auto constants = reinterpret_cast<const size_t *>(pos);
 		auto line_count = re.line_count = constants[0];
 		re.file_size = constants[1];
-		pos += 2 * sizeof(size_t);
-		size -= 2 * sizeof(size_t);
 
-		for (auto & column : re.columns)
-			column.resize(line_count);
 		for (auto & sign : re.signs)
 			sign.resize(line_count);
+		for (auto & column : re.columns)
+			column.resize(line_count);
 
-		auto read = decompressor(pos, size, re.columns[0]);
-		pos += read;
-		size -= read;
-		utils::seq::diff::reconstruct(re.columns[0]);
+		decompressor.start(reinterpret_cast<const std::byte *>(pos + 2 * sizeof(size_t)), size - 2 * sizeof(size_t));
 
-		for (size_t i = 1; i < 71; ++i)
-		{
-			read = decompressor(pos, size, re.columns[i]);
-			pos += read;
-			size -= read;
-		}
-
+		bool more = true;
 		for (auto & sign : re.signs)
 		{
-			read = decompressor(pos, size, sign);
-			pos += read;
-			size -= read;
+			if (!more)
+			[[unlikely]]
+				throw std::runtime_error("insufficient data for decompression");
+			more = decompressor(sign);
 		}
-
-		if (size > 0)
-			throw std::runtime_error("redundant data found in the compressed file");
+		for (auto & column : re.columns)
+		{
+			if (!more)
+			[[unlikely]]
+				throw std::runtime_error("insufficient data for decompression");
+			more = decompressor(column);
+		}
+		if (more)
+		[[unlikely]]
+			throw std::runtime_error("redundant data found at the end of the file");
+		utils::seq::diff::reconstruct(re.columns[0]);
 
 		return re;
 	}
@@ -226,46 +224,25 @@ public:
 	{
 		static constexpr size_t leading_size = 1 + 2 * sizeof(size_t);
 
-		size_t capacity = leading_size + 71 * (
-			sizeof(size_t) +
-			line_count * sizeof(uint64_t) +
-			sizeof(size_t) +
-			line_count * sizeof(uint8_t)
-		);
+		size_t capacity = leading_size + line_count * 71 * sizeof(uint64_t);
 		utils::blank_file(path, capacity);
 		auto file = mio::mmap_sink(path);
 		auto pos = file.data();
 
-		*pos++ = static_cast<uint8_t>(utils::file_type::dat);
-		auto constants = reinterpret_cast<size_t *>(pos);
+		*pos = static_cast<uint8_t>(utils::file_type::dat);
+		auto constants = reinterpret_cast<size_t *>(pos + 1);
 		constants[0] = line_count;
 		constants[1] = file_size;
-		pos += 2 * sizeof(size_t);
-		capacity -= leading_size;
-		size_t total = leading_size;
 
-		auto written = compressor(pos, capacity, utils::seq::diff::construct(columns[0]));
-		total += written;
-		pos += written;
-		capacity -= written;
-
-		for (size_t i = 1; i < 71; ++i)
-		{
-			written = compressor(pos, capacity, columns[i]);
-			total += written;
-			pos += written;
-			capacity -= written;
-		}
+		compressor.start(reinterpret_cast<std::byte *>(pos + leading_size), capacity - leading_size);
 
 		for (const auto & sign : signs)
-		{
-			written = compressor(pos, capacity, sign);
-			total += written;
-			pos += written;
-			capacity -= written;
-		}
+			compressor(sign);
+		compressor(utils::seq::diff::construct(columns[0]));
+		for (size_t i = 1; i < 71; ++i)
+			compressor(columns[i]);
 
-		std::filesystem::resize_file(path, total);
+		std::filesystem::resize_file(path, leading_size + compressor.stop());
 	}
 
 	inline void write(std::path_like auto && path) const
