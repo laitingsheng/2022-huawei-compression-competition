@@ -42,65 +42,75 @@ class data final
 	};
 
 	std::array<std::vector<uint8_t>, 71> signs;
-	std::array<std::vector<uint64_t>, 71> columns;
+	std::array<std::vector<uint32_t>, 71> integers, mantissas;
 	size_t line_count, file_size;
 
-	explicit data() : columns(), line_count(0), file_size(0) {}
+	explicit data() : signs(), integers(), mantissas(), line_count(0), file_size(0) {}
 
 	template<char sep, size_t mantissa_width>
 	[[nodiscard]]
 	inline const char * parse_cell(const char * pos, size_t & size, size_t index)
 	{
-		constexpr size_t max_integer_width = std::numeric_limits<uint64_t>::digits10 - mantissa_width;
+		constexpr size_t max_width = std::numeric_limits<uint32_t>::digits10;
+		static_assert(mantissa_width <= max_width, "invalid mantissa_width");
 
-		bool sign;
-		size_t integer_width;
-		uint64_t number;
+		size_t width, total_width = 1;
+		uint32_t number;
 		char c = *pos++;
 		if (c == '-')
 		{
-			sign = true;
-			integer_width = 0;
+			signs[index].push_back(true);
+			width = 0;
 			number = 0;
 		}
 		else
 		{
-			sign = false;
-			integer_width = 1;
+			signs[index].push_back(false);
+			width = 1;
 			number = hex_digits_reverse.at(c);
 		}
 
-		signs[index].push_back(sign);
-
-		for (c = *pos++; integer_width < max_integer_width && isdigit(c); c = *pos++, ++integer_width)
-			number = number * 10 + hex_digits_reverse.at(c);
-
-		if (isdigit(c))
-		[[unlikely]]
-			throw std::runtime_error("insufficient length for the floating point integer part");
+		while (width < max_width + 1)
+		{
+			c = *pos++;
+			++total_width;
+			if (hex_digits_reverse.count(c))
+			{
+				++width;
+				number = number * 10 + hex_digits_reverse.at(c);
+			}
+			else
+			[[unlikely]]
+				break;
+		}
 
 		if (c != '.')
 		[[unlikely]]
-			throw std::runtime_error("unprocessable integer part of the floating point");
+			throw std::runtime_error("unexpected floating point format");
+		integers[index].push_back(number);
 
-		size_t parsed_mantissa_width = 0;
-		for (c = *pos++; parsed_mantissa_width < mantissa_width && isdigit(c); c = *pos++, ++parsed_mantissa_width)
-			number = number * 10 + hex_digits_reverse.at(c);
-
-		if (parsed_mantissa_width < mantissa_width)
-		[[unlikely]]
-			throw std::runtime_error("insufficient mantissa parsed from the input");
-
-		if (isdigit(c))
-		[[unlikely]]
-			throw std::runtime_error("insufficient length for the floating point mantissa part");
+		width = 0;
+		number = 0;
+		while (width < mantissa_width + 1)
+		{
+			c = *pos++;
+			++total_width;
+			if (hex_digits_reverse.count(c))
+			{
+				++width;
+				number = number * 10 + hex_digits_reverse.at(c);
+			}
+			else
+			[[unlikely]]
+				break;
+		}
 
 		if (c != sep)
 		[[unlikely]]
 			throw std::runtime_error(fmt::format(FMT_COMPILE("expect separator {:#02x}, got {:#02x}"), sep, c));
+		mantissas[index].push_back(number);
 
-		columns[index].push_back(number);
-		size -= sign + integer_width + 1 + mantissa_width + 1;
+		size -= total_width;
 		return pos;
 	}
 
@@ -108,16 +118,23 @@ class data final
 	[[nodiscard]]
 	inline char * write_cell(char * pos, size_t & capacity, size_t line, size_t index) const
 	{
-		auto number = columns[index][line];
+		constexpr size_t max_width = std::numeric_limits<uint32_t>::digits10;
+		static_assert(mantissa_width <= max_width, "invalid mantissa_width");
+		constexpr size_t max_cell_width = 2 * max_width + 3;
+
 		std::vector<char> buffer;
-		buffer.reserve(std::numeric_limits<uint64_t>::digits10 + 3);
+		buffer.reserve(max_cell_width);
 		buffer.push_back(sep);
+		auto number = mantissas[index][line];
 		for (size_t i = 0; i < mantissa_width; ++i)
 		{
 			buffer.push_back(hex_digits.at(number % 10));
 			number /= 10;
 		}
+
 		buffer.push_back('.');
+
+		number = integers[index][line];
 		if (number > 0)
 		{
 			while (number > 0)
@@ -153,8 +170,10 @@ public:
 
 		for (auto & sign : re.signs)
 			sign.resize(line_count);
-		for (auto & column : re.columns)
-			column.resize(line_count);
+		for (auto & integer : re.integers)
+			integer.resize(line_count);
+		for (auto & mantissa : re.mantissas)
+			mantissa.resize(line_count);
 
 		decompressor.start(reinterpret_cast<const std::byte *>(pos + 2 * sizeof(size_t)), size - 2 * sizeof(size_t));
 
@@ -166,17 +185,23 @@ public:
 				throw std::runtime_error("insufficient data for decompression");
 			more = decompressor(sign);
 		}
-		for (auto & column : re.columns)
+		for (auto & integer : re.integers)
 		{
 			if (!more)
 			[[unlikely]]
 				throw std::runtime_error("insufficient data for decompression");
-			more = decompressor(column);
+			more = decompressor(integer);
+		}
+		for (auto & mantissa : re.mantissas)
+		{
+			if (!more)
+			[[unlikely]]
+				throw std::runtime_error("insufficient data for decompression");
+			more = decompressor(mantissa);
 		}
 		if (more)
 		[[unlikely]]
 			throw std::runtime_error("redundant data found at the end of the file");
-		utils::seq::diff::reconstruct(re.columns[0]);
 
 		return re;
 	}
@@ -206,8 +231,10 @@ public:
 		re.line_count = line_count;
 		for (auto & sign : re.signs)
 			sign.shrink_to_fit();
-		for (auto & column : re.columns)
-			column.shrink_to_fit();
+		for (auto & integer : re.integers)
+			integer.shrink_to_fit();
+		for (auto & mantissa : re.mantissas)
+			mantissa.shrink_to_fit();
 
 		return re;
 	}
@@ -238,9 +265,10 @@ public:
 
 		for (const auto & sign : signs)
 			compressor(sign);
-		compressor(utils::seq::diff::construct(columns[0]));
-		for (size_t i = 1; i < 71; ++i)
-			compressor(columns[i]);
+		for (const auto & integer : integers)
+			compressor(integer);
+		for (const auto & mantissa : mantissas)
+			compressor(mantissa);
 
 		std::filesystem::resize_file(path, leading_size + compressor.stop());
 	}

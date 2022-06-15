@@ -10,10 +10,8 @@
 
 #include <fmt/compile.h>
 #include <fmt/core.h>
-#include <mio/mmap.hpp>
 #include <fast-lzma2/fast-lzma2.h>
 
-#include "../std.hpp"
 #include "./traits.hpp"
 
 namespace utils
@@ -83,7 +81,7 @@ public:
 	compressor & operator=(const compressor &) = delete;
 	compressor & operator=(compressor &&) = delete;
 
-	inline void start(std::byte * output, size_t capacity)
+	inline void start(std::byte * bytes, size_t capacity)
 	{
 		if (streaming)
 		[[unlikely]]
@@ -96,7 +94,7 @@ public:
 
 		streaming = true;
 		buffer = {
-			.dst = output,
+			.dst = bytes,
 			.size = capacity,
 			.pos = 0
 		};
