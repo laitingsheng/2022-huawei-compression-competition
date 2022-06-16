@@ -22,3 +22,6 @@
 [submodule "external/tcmalloc"]
 	path = external/tcmalloc
 	url = git@github.com:google/tcmalloc.git
+[submodule "external/abseil-cpp"]
+	path = external/abseil-cpp
+	url = git@github.com:abseil/abseil-cpp.git
