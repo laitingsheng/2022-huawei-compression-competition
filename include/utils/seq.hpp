@@ -7,14 +7,13 @@
 
 #include <algorithm>
 #include <concepts>
+#include <limits>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
-namespace utils::seq
-{
-
-namespace diff
+namespace utils::seq::diff
 {
 
 template<std::integral T>
@@ -74,8 +73,6 @@ inline static std::vector<T> reconstruct(std::vector<T> && sequence, T initial =
 {
 	std::vector<T> re(sequence);
 	return std::move(reconstruct(re, initial));
-}
-
 }
 
 }

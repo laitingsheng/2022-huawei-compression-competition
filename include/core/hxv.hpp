@@ -104,7 +104,7 @@ class data final
 	}
 public:
 	[[nodiscard]]
-	inline static data decompress(utils::decompressor auto && decompressor, const char * pos, size_t size)
+	inline static data decompress(utils::decompressor auto & decompressor, const char * pos, size_t size)
 	{
 		data re;
 
@@ -114,18 +114,11 @@ public:
 
 		decompressor.start(reinterpret_cast<const std::byte *>(pos + sizeof(size_t)), size - sizeof(size_t));
 
-		bool more = true;
 		for (auto & column : re.columns)
-		{
-			if (!more)
-			[[unlikely]]
-				throw std::runtime_error("insufficient data for decompression");
-			more = decompressor(column);
-		}
-		if (more)
-		[[unlikely]]
-			throw std::runtime_error("redundant data found at the end of the file");
+			decompressor(column);
 		utils::seq::diff::reconstruct(re.columns[1]);
+
+		decompressor.stop();
 
 		return re;
 	}
@@ -160,7 +153,7 @@ public:
 	data & operator=(const data &) = default;
 	data & operator=(data &&) noexcept = default;
 
-	inline void compress(utils::compressor auto && compressor, std::path_like auto && path) const
+	inline void compress(utils::compressor auto & compressor, std::path_like auto && path) const
 	{
 		static constexpr size_t leading_size = 1 + sizeof(size_t);
 
@@ -179,7 +172,9 @@ public:
 		for (size_t i = 2; i < 10; ++i)
 			compressor(columns[i]);
 
-		std::filesystem::resize_file(path, leading_size + compressor.stop());
+		compressor.stop();
+
+		std::filesystem::resize_file(path, leading_size + compressor.used());
 	}
 
 	inline void write(std::path_like auto && path) const

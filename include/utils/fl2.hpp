@@ -21,12 +21,12 @@ namespace fl2
 {
 
 #define CHECK_FL2_RETURN(__E, __FM, ...) \
-if (auto __ret = (__E); FL2_isError(__ret)) \
+if (auto ret = (__E); FL2_isError(ret)) \
 [[unlikely]] \
 	throw std::runtime_error(fmt::format( \
 		FMT_COMPILE("failed to " __FM " ({})"), \
 		__VA_ARGS__ __VA_OPT__(,) \
-		FL2_getErrorName(__ret) \
+		FL2_getErrorName(ret) \
 	));
 
 class compressor final
@@ -81,6 +81,57 @@ public:
 	compressor & operator=(const compressor &) = delete;
 	compressor & operator=(compressor &&) = delete;
 
+	inline void operator()(FL2_inBuffer & input)
+	{
+		if (!streaming)
+		[[unlikely]]
+			throw std::runtime_error("compression stream should be started before using it");
+
+		CHECK_FL2_RETURN(FL2_compressStream(_ctx, &buffer, &input), "compress data")
+		else if (ret)
+		[[unlikely]]
+			throw std::runtime_error("insufficient output buffer capacity");
+
+		if (buffer.pos == buffer.size)
+			streaming = false;
+	}
+
+	inline void operator()(const std::byte * bytes, size_t size)
+	{
+		FL2_inBuffer input {
+			.src = bytes,
+			.size = size,
+			.pos = 0
+		};
+		operator()(input);
+	}
+
+	template<std::integral T>
+	inline bool operator()(const T & content)
+	{
+		fmt::print("test\n");
+		operator()(reinterpret_cast<const std::byte *>(&content), sizeof(T));
+		fmt::print("test\n");
+	}
+
+	template<std::integral T, size_t N>
+	inline void operator()(const std::array<T, N> & content)
+	{
+		operator()(reinterpret_cast<const std::byte *>(content.data()), N * sizeof(T));
+	}
+
+	template<std::integral T>
+	inline void operator()(const std::vector<T> & content)
+	{
+		operator()(reinterpret_cast<const std::byte *>(content.data()), content.size() * sizeof(T));
+	}
+
+	[[nodiscard]]
+	inline bool is_streaming() const
+	{
+		return streaming;
+	}
+
 	inline void start(std::byte * bytes, size_t capacity)
 	{
 		if (streaming)
@@ -100,54 +151,17 @@ public:
 		};
 	}
 
-	inline size_t stop()
+	inline void stop()
 	{
-		if (!streaming)
-		[[unlikely]]
-			throw std::runtime_error("compression stream not started");
-
-		auto ret = FL2_endStream(_ctx, &buffer);
-		CHECK_FL2_RETURN(ret, "end compression stream")
-		if (ret)
-		[[unlikely]]
-			throw std::runtime_error("insufficient output buffer capacity");
+		CHECK_FL2_RETURN(FL2_endStream(_ctx, &buffer), "end compression stream")
 
 		streaming = false;
+	}
+
+	[[nodiscard]]
+	inline size_t used() const
+	{
 		return buffer.pos;
-	}
-
-	inline void operator()(FL2_inBuffer * input)
-	{
-		if (!streaming)
-		[[unlikely]]
-			throw std::runtime_error("compression stream should be started before using it");
-
-		auto ret = FL2_compressStream(_ctx, &buffer, input);
-		CHECK_FL2_RETURN(ret, "compress data")
-		if (ret)
-		[[unlikely]]
-			throw std::runtime_error("insufficient output buffer capacity");
-	}
-
-	inline void operator()(FL2_inBuffer & input)
-	{
-		operator()(&input);
-	}
-
-	inline void operator()(const std::byte * bytes, size_t size)
-	{
-		FL2_inBuffer input {
-			.src = bytes,
-			.size = size,
-			.pos = 0
-		};
-		operator()(input);
-	}
-
-	template<std::integral T>
-	inline void operator()(const std::vector<T> & content)
-	{
-		operator()(reinterpret_cast<const std::byte *>(content.data()), content.size() * sizeof(T));
 	}
 };
 
@@ -168,6 +182,8 @@ public:
 
 	~decompressor() noexcept
 	{
+		if (streaming)
+			stop();
 		CHECK_FL2_RETURN(
 			FL2_freeDStream(_ctx),
 			"free decompression stream"
@@ -177,16 +193,58 @@ public:
 	decompressor & operator=(const decompressor &) = delete;
 	decompressor & operator=(decompressor &&) = delete;
 
+	inline void operator()(FL2_outBuffer & output)
+	{
+		if (!streaming)
+		[[unlikely]]
+			throw std::runtime_error("decompression stream should be started before using it");
+
+		CHECK_FL2_RETURN(FL2_decompressStream(_ctx, &output, &buffer), "decompress data")
+		else if (!ret)
+			streaming = false;
+	}
+
+	inline void operator()(std::byte * bytes, size_t size)
+	{
+		FL2_outBuffer output {
+			.dst = bytes,
+			.size = size,
+			.pos = 0
+		};
+		operator()(output);
+	}
+
+	template<std::integral T>
+	inline void operator()(T & content)
+	{
+		operator()(reinterpret_cast<std::byte *>(&content), sizeof(T));
+	}
+
+	template<std::integral T, size_t N>
+	inline void operator()(std::array<T, N> & content)
+	{
+		operator()(reinterpret_cast<std::byte *>(content.data()), N * sizeof(T));
+	}
+
+	template<std::integral T>
+	inline void operator()(std::vector<T> & content)
+	{
+		operator()(reinterpret_cast<std::byte *>(content.data()), content.size() * sizeof(T));
+	}
+
+	[[nodiscard]]
+	inline bool is_streaming() const
+	{
+		return streaming;
+	}
+
 	inline void start(const std::byte * bytes, size_t size)
 	{
 		if (streaming)
 		[[unlikely]]
 			throw std::runtime_error("decompression stream already started");
 
-		CHECK_FL2_RETURN(
-			FL2_initDStream(_ctx),
-			"initialise decompression stream"
-		)
+		CHECK_FL2_RETURN(FL2_initDStream(_ctx), "initialise decompression stream")
 
 		streaming = true;
 		buffer = {
@@ -198,47 +256,11 @@ public:
 
 	inline void stop()
 	{
-		if (!streaming)
-		[[unlikely]]
-			throw std::runtime_error("decompression stream not started");
-
 		if (buffer.pos != buffer.size)
 		[[unlikely]]
 			throw std::runtime_error("decompression stream not fully consumed");
 
 		streaming = false;
-	}
-
-	inline bool operator()(FL2_outBuffer * output)
-	{
-		if (!streaming)
-		[[unlikely]]
-			throw std::runtime_error("decompression stream should be started before using it");
-
-		auto ret = FL2_decompressStream(_ctx, output, &buffer);
-		CHECK_FL2_RETURN(ret, "decompress data")
-		return ret;
-	}
-
-	inline bool operator()(FL2_outBuffer & output)
-	{
-		return operator()(&output);
-	}
-
-	inline bool operator()(std::byte * bytes, size_t size)
-	{
-		FL2_outBuffer output {
-			.dst = bytes,
-			.size = size,
-			.pos = 0
-		};
-		return operator()(output);
-	}
-
-	template<std::integral T>
-	inline bool operator()(std::vector<T> & content)
-	{
-		return operator()(reinterpret_cast<std::byte *>(content.data()), content.size() * sizeof(T));
 	}
 };
 
