@@ -1,9 +1,0 @@
-include(common)
-
-set(ZSTD_MULTITHREAD_SUPPORT OFF)
-set(ZSTD_LEGACY_SUPPORT OFF)
-set(ZSTD_BUILD_PROGRAMS OFF)
-set(ZSTD_BUILD_CONTRIB OFF)
-set(ZSTD_BUILD_SHARED OFF)
-set(ZSTD_BUILD_STATIC ON)
-add_subdirectory(external/zstd/build/cmake EXCLUDE_FROM_ALL)

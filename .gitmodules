@@ -7,21 +7,6 @@
 [submodule "external/frozen"]
 	path = external/frozen
 	url = git@github.com:serge-sans-paille/frozen.git
-[submodule "external/brotli"]
-	path = external/brotli
-	url = git@github.com:google/brotli.git
 [submodule "external/fast-lzma2"]
 	path = external/fast-lzma2
 	url = git@github.com:conor42/fast-lzma2.git
-[submodule "external/zstd"]
-	path = external/zstd
-	url = git@github.com:facebook/zstd.git
-[submodule "external/doctest"]
-	path = external/doctest
-	url = git@github.com:doctest/doctest.git
-[submodule "external/tcmalloc"]
-	path = external/tcmalloc
-	url = git@github.com:google/tcmalloc.git
-[submodule "external/abseil-cpp"]
-	path = external/abseil-cpp
-	url = git@github.com:abseil/abseil-cpp.git

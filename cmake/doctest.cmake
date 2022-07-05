@@ -1,8 +1,0 @@
-include(common)
-
-set(DOCTEST_WITH_TESTS OFF)
-set(DOCTEST_WITH_MAIN_IN_STATIC_LIB ON)
-set(DOCTEST_NO_INSTALL ON)
-set(DOCTEST_USE_STD_HEADERS OFF)
-
-add_subdirectory(external/doctest EXCLUDE_FROM_ALL)

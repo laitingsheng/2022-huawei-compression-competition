@@ -8,7 +8,6 @@ include(fmt)
 include(mio)
 include(frozen)
 include(fast-lzma2)
-include(brotli)
 
 include(common)
 
@@ -21,6 +20,4 @@ target_link_libraries(task PRIVATE
 	mio::mio
 	frozen::frozen
 	fl2::fl2
-	brotlidec-static
-	brotlienc-static
 )

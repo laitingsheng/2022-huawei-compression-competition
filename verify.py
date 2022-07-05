@@ -37,7 +37,7 @@ def _main() -> int:
     args = parser.parse_args()
 
     if args.generate:
-        if r := _execute("cmake", "--toolchain", "toolchains/gnu/host.cmake", "-G", "Ninja", "-B", "build", ".", "-DCMAKE_BUILD_TYPE=Release"):
+        if r := _execute("cmake", "--toolchain", "toolchains/gnu/host.cmake", "-G", "Ninja", "-B", "build", "."):
             print("Failed to generate build files.", file=sys.stderr)
             return r
 

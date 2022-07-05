@@ -17,12 +17,11 @@ namespace core
 [[using gnu : always_inline]]
 inline static void compress(const std::string & source_path, const std::string & dest_path)
 {
-	utils::fl2::compressor compressor;
 	auto source = mio::mmap_source(source_path);
 	if (std::string extension = std::filesystem::path(source_path).extension(); extension == ".dat")
-		dat::data::parse(source.data(), source.size()).compress(compressor, dest_path);
+		dat::data::parse(source.data(), source.size()).compress(utils::fl2::compressor(), dest_path);
 	else if (extension == ".hxv")
-		hxv::data::parse(source.data(), source.size()).compress(compressor, dest_path);
+		hxv::data::parse(source.data(), source.size()).compress(utils::fl2::compressor(), dest_path);
 	else
 	[[unlikely]]
 		throw std::runtime_error("unexpected file type");
@@ -34,11 +33,10 @@ inline static void decompress(const std::string & source_path, const std::string
 	auto source = mio::mmap_source(source_path);
 	auto read_pos = source.data();
 
-	utils::fl2::decompressor decompressor;
 	if (auto file_type = static_cast<utils::file_type>(*read_pos++); file_type == utils::file_type::dat)
-		dat::data::decompress(decompressor, read_pos, source.size() - 1).write(dest_path);
+		dat::data::decompress(utils::fl2::decompressor(), read_pos, source.size() - 1).write(dest_path);
 	else if (file_type == utils::file_type::hxv)
-		hxv::data::decompress(decompressor, read_pos, source.size() - 1).write(dest_path);
+		hxv::data::decompress(utils::fl2::decompressor(), read_pos, source.size() - 1).write(dest_path);
 	else
 	[[unlikely]]
 		throw std::runtime_error("unexpected file type");

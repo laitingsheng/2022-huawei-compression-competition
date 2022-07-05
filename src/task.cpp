@@ -1,7 +1,6 @@
 #include <cstdint>
 
 #include <stdexcept>
-#include <string>
 
 #include "core/core.hpp"
 
