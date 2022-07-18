@@ -1,1 +1,1 @@
-../../external/fast-lzma2/radix_get.h
+../../externals/fast-lzma2/radix_get.h

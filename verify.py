@@ -66,7 +66,7 @@ def _main() -> int:
             return r
         compress_time = time.monotonic() - now
         print(f"    Compression took {compress_time:.3f}s")
-        print(f"    Compression throughput: {file.stat().st_size / compress_time / (2 << 20):.3f}MB/s")
+        print(f"    Compression throughput: {file.stat().st_size / compress_time / (1 << 20):.3f}MB/s")
         print(f"    Ratio: {file.stat().st_size / compressed_file.stat().st_size: .3f}")
 
         total_raw_size += file.stat().st_size
@@ -79,7 +79,7 @@ def _main() -> int:
             return r
         decompress_time = time.monotonic() - now
         print(f"    Decompression took {decompress_time:.3f}s")
-        print(f"    Decompression throughput: {file.stat().st_size / decompress_time / (2 << 20):.3f}MB/s")
+        print(f"    Decompression throughput: {file.stat().st_size / decompress_time / (1 << 20):.3f}MB/s")
 
         total_decompress_time += decompress_time
 
@@ -91,8 +91,8 @@ def _main() -> int:
 
     if args.files:
         print("Overall:")
-        print(f"    Compression throughput: {total_raw_size / total_compress_time / (2 << 20):.3f}MB/s")
-        print(f"    Decompression throughput: {total_raw_size / total_decompress_time / (2 << 20):.3f}MB/s")
+        print(f"    Compression throughput: {total_raw_size / total_compress_time / (1 << 20):.3f}MB/s")
+        print(f"    Decompression throughput: {total_raw_size / total_decompress_time / (1 << 20):.3f}MB/s")
         print(f"    Ratio: {total_raw_size / total_compressed_size: .3f}")
 
     return 0

@@ -1,1 +1,1 @@
-../../external/fast-lzma2/radix_mf.c
+../../externals/fast-lzma2/radix_mf.c

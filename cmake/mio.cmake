@@ -1,3 +1,3 @@
 include(common)
 
-add_subdirectory(external/mio EXCLUDE_FROM_ALL)
+add_subdirectory(externals/mio EXCLUDE_FROM_ALL)

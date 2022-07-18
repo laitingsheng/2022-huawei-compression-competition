@@ -1,1 +1,1 @@
-../../external/fast-lzma2/range_enc.c
+../../externals/fast-lzma2/range_enc.c

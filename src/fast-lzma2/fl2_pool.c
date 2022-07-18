@@ -1,1 +1,1 @@
-../../external/fast-lzma2/fl2_pool.c
+../../externals/fast-lzma2/fl2_pool.c

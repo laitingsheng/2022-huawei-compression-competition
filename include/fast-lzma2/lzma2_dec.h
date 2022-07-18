@@ -1,1 +1,1 @@
-../../external/fast-lzma2/lzma2_dec.h
+../../externals/fast-lzma2/lzma2_dec.h

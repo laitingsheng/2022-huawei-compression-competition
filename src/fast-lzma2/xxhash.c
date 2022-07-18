@@ -1,1 +1,1 @@
-../../external/fast-lzma2/xxhash.c
+../../externals/fast-lzma2/xxhash.c

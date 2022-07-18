@@ -4,9 +4,15 @@
 [submodule "external/mio"]
 	path = external/mio
 	url = https://github.com/mandreyel/mio.git
-[submodule "external/frozen"]
-	path = external/frozen
-	url = git@github.com:serge-sans-paille/frozen.git
 [submodule "external/fast-lzma2"]
 	path = external/fast-lzma2
+	url = git@github.com:conor42/fast-lzma2.git
+[submodule "externals/fmt"]
+	path = externals/fmt
+	url = git@github.com:fmtlib/fmt.git
+[submodule "externals/mio"]
+	path = externals/mio
+	url = git@github.com:mandreyel/mio.git
+[submodule "externals/fast-lzma2"]
+	path = externals/fast-lzma2
 	url = git@github.com:conor42/fast-lzma2.git

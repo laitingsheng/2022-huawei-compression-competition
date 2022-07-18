@@ -1,1 +1,1 @@
-../../external/fast-lzma2/radix_struct.c
+../../externals/fast-lzma2/radix_struct.c

@@ -1,1 +1,1 @@
-../../external/fast-lzma2/fl2_compress_internal.h
+../../externals/fast-lzma2/fl2_compress_internal.h

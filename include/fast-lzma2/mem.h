@@ -1,1 +1,1 @@
-../../external/fast-lzma2/mem.h
+../../externals/fast-lzma2/mem.h

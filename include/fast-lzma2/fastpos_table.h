@@ -1,1 +1,1 @@
-../../external/fast-lzma2/fastpos_table.h
+../../externals/fast-lzma2/fastpos_table.h

@@ -1,4 +1,13 @@
 {
-	"C_Cpp.default.cppStandard": "c++20",
-	"C_Cpp.default.cStandard": "c17"
+  "cmake.generator": "Ninja",
+  "C_Cpp.autoAddFileAssociations": false,
+  "C_Cpp.default.cStandard": "c17",
+  "C_Cpp.default.cppStandard": "c++20",
+  "C_Cpp.default.includePath": [
+    "${workspaceFolder}/include",
+    "${workspaceFolder}/externals/ctre/include",
+    "${workspaceFolder}/externals/fmt/include",
+    "${workspaceFolder}/externals/mio/include"
+  ],
+  "editor.hover.enabled": false
 }

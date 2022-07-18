@@ -1,1 +1,1 @@
-../../external/fast-lzma2/fl2_errors.h
+../../externals/fast-lzma2/fl2_errors.h

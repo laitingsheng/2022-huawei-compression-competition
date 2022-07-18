@@ -1,1 +1,1 @@
-../../external/fast-lzma2/data_block.h
+../../externals/fast-lzma2/data_block.h

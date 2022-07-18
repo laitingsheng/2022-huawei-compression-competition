@@ -83,7 +83,7 @@ public:
 	compressor & operator=(const compressor &) = delete;
 	compressor & operator=(compressor &&) = delete;
 
-	inline void start(std::byte * output, size_t capacity)
+	void start(std::byte * output, size_t capacity)
 	{
 		if (streaming)
 		[[unlikely]]
@@ -102,7 +102,8 @@ public:
 		};
 	}
 
-	inline size_t stop()
+	[[nodiscard]]
+	size_t stop()
 	{
 		if (!streaming)
 		[[unlikely]]
@@ -118,7 +119,7 @@ public:
 		return buffer.pos;
 	}
 
-	inline void operator()(FL2_inBuffer * input)
+	void operator()(FL2_inBuffer * input)
 	{
 		if (!streaming)
 		[[unlikely]]
@@ -131,12 +132,12 @@ public:
 			throw std::runtime_error("insufficient output buffer capacity");
 	}
 
-	inline void operator()(FL2_inBuffer & input)
+	void operator()(FL2_inBuffer & input)
 	{
 		operator()(&input);
 	}
 
-	inline void operator()(const std::byte * bytes, size_t size)
+	void operator()(const std::byte * bytes, size_t size)
 	{
 		FL2_inBuffer input {
 			.src = bytes,
@@ -147,9 +148,21 @@ public:
 	}
 
 	template<std::integral T>
-	inline void operator()(const std::vector<T> & content)
+	void operator()(const T * bytes, size_t count)
 	{
-		operator()(reinterpret_cast<const std::byte *>(content.data()), content.size() * sizeof(T));
+		operator()(reinterpret_cast<const std::byte *>(bytes), count * sizeof(T));
+	}
+
+	template<std::integral T>
+	void operator()(const std::vector<T> & content)
+	{
+		operator()(content.data(), content.size());
+	}
+
+	template<std::integral T, size_t N>
+	void operator()(const std::array<T, N> & content)
+	{
+		operator()(content.data(), content.size());
 	}
 };
 
@@ -179,7 +192,7 @@ public:
 	decompressor & operator=(const decompressor &) = delete;
 	decompressor & operator=(decompressor &&) = delete;
 
-	inline void start(const std::byte * bytes, size_t size)
+	void start(const std::byte * bytes, size_t size)
 	{
 		if (streaming)
 		[[unlikely]]
@@ -198,7 +211,7 @@ public:
 		};
 	}
 
-	inline void stop()
+	void stop()
 	{
 		if (!streaming)
 		[[unlikely]]
@@ -211,7 +224,7 @@ public:
 		streaming = false;
 	}
 
-	inline bool operator()(FL2_outBuffer * output)
+	bool operator()(FL2_outBuffer * output)
 	{
 		if (!streaming)
 		[[unlikely]]
@@ -222,12 +235,12 @@ public:
 		return ret;
 	}
 
-	inline bool operator()(FL2_outBuffer & output)
+	bool operator()(FL2_outBuffer & output)
 	{
 		return operator()(&output);
 	}
 
-	inline bool operator()(std::byte * bytes, size_t size)
+	bool operator()(std::byte * bytes, size_t size)
 	{
 		FL2_outBuffer output {
 			.dst = bytes,
@@ -238,9 +251,21 @@ public:
 	}
 
 	template<std::integral T>
-	inline bool operator()(std::vector<T> & content)
+	bool operator()(T * bytes, size_t count)
 	{
-		return operator()(reinterpret_cast<std::byte *>(content.data()), content.size() * sizeof(T));
+		return operator()(reinterpret_cast<std::byte *>(bytes), count * sizeof(T));
+	}
+
+	template<std::integral T>
+	bool operator()(std::vector<T> & content)
+	{
+		return operator()(content.data(), content.size());
+	}
+
+	template<std::integral T, size_t N>
+	bool operator()(std::array<T, N> & content)
+	{
+		return operator()(content.data(), content.size());
 	}
 };
 

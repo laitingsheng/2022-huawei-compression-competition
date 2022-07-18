@@ -1,1 +1,1 @@
-../../external/fast-lzma2/count.h
+../../externals/fast-lzma2/count.h

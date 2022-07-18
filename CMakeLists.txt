@@ -6,7 +6,6 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 
 include(fmt)
 include(mio)
-include(frozen)
 include(fast-lzma2)
 
 include(common)
@@ -18,6 +17,5 @@ target_include_directories(task PRIVATE
 target_link_libraries(task PRIVATE
 	fmt::fmt
 	mio::mio
-	frozen::frozen
 	fl2::fl2
 )

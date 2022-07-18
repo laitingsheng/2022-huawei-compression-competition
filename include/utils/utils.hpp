@@ -12,17 +12,11 @@ namespace utils
 {
 
 [[using gnu : always_inline]]
-inline static void blank_file(std::path_like auto && file_path, size_t size)
+inline static void blank_file(const std::path_like auto & file_path, size_t size)
 {
 	std::ofstream file(file_path, std::ios::binary);
 	file.seekp(size - 1).write("", 1);
 }
-
-enum class file_type : uint8_t
-{
-	dat,
-	hxv
-};
 
 }
 

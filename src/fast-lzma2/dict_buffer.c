@@ -1,1 +1,1 @@
-../../external/fast-lzma2/dict_buffer.c
+../../externals/fast-lzma2/dict_buffer.c

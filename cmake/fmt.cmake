@@ -10,4 +10,4 @@ set(FMT_OS ON)
 set(FMT_MODULE OFF)
 set(FMT_SYSTEM_HEADERS OFF)
 
-add_subdirectory(external/fmt EXCLUDE_FROM_ALL)
+add_subdirectory(externals/fmt EXCLUDE_FROM_ALL)

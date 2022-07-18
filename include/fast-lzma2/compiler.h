@@ -1,1 +1,1 @@
-../../external/fast-lzma2/compiler.h
+../../externals/fast-lzma2/compiler.h

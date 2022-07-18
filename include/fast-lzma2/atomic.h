@@ -1,1 +1,1 @@
-../../external/fast-lzma2/atomic.h
+../../externals/fast-lzma2/atomic.h

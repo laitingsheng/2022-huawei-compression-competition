@@ -1,1 +1,1 @@
-../../external/fast-lzma2/radix_bitpack.c
+../../externals/fast-lzma2/radix_bitpack.c
