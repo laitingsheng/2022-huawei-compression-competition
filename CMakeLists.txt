@@ -4,9 +4,10 @@ project(CompressionCompetition CXX C)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 
+include(ctre)
 include(fmt)
 include(mio)
-include(fast-lzma2)
+include(smhasher)
 
 include(common)
 
@@ -15,7 +16,8 @@ target_include_directories(task PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 target_link_libraries(task PRIVATE
+	ctre::ctre
 	fmt::fmt
 	mio::mio
-	fl2::fl2
+	smhasher::smhasher
 )

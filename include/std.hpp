@@ -46,39 +46,48 @@ template<typename T>
 concept char_type = is_char_type_v<T>;
 
 template<typename T>
-struct is_string_like : false_type {};
+struct is_char_sequence : false_type {};
 
 template<reference_type T>
-struct is_string_like<T> : is_string_like<remove_reference_t<T>> {};
+struct is_char_sequence<T> : is_char_sequence<remove_reference_t<T>> {};
 
 template<const_type T>
-struct is_string_like<T> : is_string_like<remove_const_t<T>> {};
+struct is_char_sequence<T> : is_char_sequence<remove_const_t<T>> {};
 
 template<volatile_type T>
-struct is_string_like<T> : is_string_like<remove_volatile_t<T>> {};
-
-template<char_type C>
-struct is_string_like<const C *> : true_type {};
-
-template<char_type C>
-struct is_string_like<C *> : true_type {};
+struct is_char_sequence<T> : is_char_sequence<remove_volatile_t<T>> {};
 
 template<char_type CharT, typename Traits, typename Allocator>
-struct is_string_like<basic_string<CharT, Traits, Allocator>> : true_type {};
+struct is_char_sequence<basic_string<CharT, Traits, Allocator>> : true_type {};
 
 template<char_type CharT, typename Traits>
-struct is_string_like<basic_string_view<CharT, Traits>> : true_type {};
+struct is_char_sequence<basic_string_view<CharT, Traits>> : true_type {};
 
 template<typename T>
-inline constexpr bool is_string_like_v = is_string_like<T>::value;
+inline constexpr bool is_char_sequence_v = is_char_sequence<T>::value;
 
 template<typename T>
-concept string_like = is_string_like_v<T>;
+concept char_sequence = is_char_sequence_v<T>;
 
 template<typename T>
 struct is_path_like : false_type {};
 
-template<string_like T>
+template<reference_type T>
+struct is_path_like<T> : is_path_like<remove_reference_t<T>> {};
+
+template<const_type T>
+struct is_path_like<T> : is_path_like<remove_const_t<T>> {};
+
+template<volatile_type T>
+struct is_path_like<T> : is_path_like<remove_volatile_t<T>> {};
+
+template<char_type C>
+struct is_path_like<const C *> : true_type {};
+
+template<char_type C>
+struct is_path_like<C *> : true_type {};
+
+template<char_sequence T>
 struct is_path_like<T> : true_type {};
 
 template<>

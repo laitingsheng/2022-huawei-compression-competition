@@ -2,7 +2,7 @@
 
 #include <stdexcept>
 
-#include "core.hpp"
+#include "core/core.hpp"
 
 int main(int argc, char * argv[])
 {

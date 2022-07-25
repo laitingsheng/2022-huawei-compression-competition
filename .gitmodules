@@ -13,6 +13,9 @@
 [submodule "externals/mio"]
 	path = externals/mio
 	url = git@github.com:mandreyel/mio.git
-[submodule "externals/fast-lzma2"]
-	path = externals/fast-lzma2
-	url = git@github.com:conor42/fast-lzma2.git
+[submodule "externals/ctre"]
+	path = externals/ctre
+	url = git@github.com:hanickadot/compile-time-regular-expressions.git
+[submodule "externals/smhasher"]
+	path = externals/smhasher
+	url = git@github.com:aappleby/smhasher.git

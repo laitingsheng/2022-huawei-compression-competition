@@ -7,7 +7,8 @@
     "${workspaceFolder}/include",
     "${workspaceFolder}/externals/ctre/include",
     "${workspaceFolder}/externals/fmt/include",
-    "${workspaceFolder}/externals/mio/include"
+    "${workspaceFolder}/externals/mio/include",
+    "${workspaceFolder}/wrapped/smhasher/include"
   ],
   "editor.hover.enabled": false
 }
