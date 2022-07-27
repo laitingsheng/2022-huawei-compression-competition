@@ -7,7 +7,6 @@ set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 include(ctre)
 include(fmt)
 include(mio)
-include(smhasher)
 
 include(common)
 
@@ -19,5 +18,4 @@ target_link_libraries(task PRIVATE
 	ctre::ctre
 	fmt::fmt
 	mio::mio
-	smhasher::smhasher
 )

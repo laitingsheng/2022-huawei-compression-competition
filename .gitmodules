@@ -16,6 +16,3 @@
 [submodule "externals/ctre"]
 	path = externals/ctre
 	url = git@github.com:hanickadot/compile-time-regular-expressions.git
-[submodule "externals/smhasher"]
-	path = externals/smhasher
-	url = git@github.com:aappleby/smhasher.git
